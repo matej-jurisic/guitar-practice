@@ -1,0 +1,12 @@
+services:
+  guitar:
+    build: .
+    container_name: guitar-practice
+    ports:
+      - "8080:8080"
+    volumes:
+      - guitar-data:/data
+    restart: unless-stopped
+
+volumes:
+  guitar-data:

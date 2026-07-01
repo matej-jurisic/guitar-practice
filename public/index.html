@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Guitar Practice</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ── top bar: brand on the left, tab switch on the right (desktop). On
+     phones the tabs detach to a fixed bottom bar; the brand stays up here. ── -->
+<div class="topbar">
+  <div class="brand"><span class="brand-mark">▚</span>GUITAR<b>PRACTICE</b></div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="practice">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      <span>Practice</span>
+    </button>
+    <button class="tab" data-tab="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="20" x2="6" y2="14"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="18" y1="20" x2="18" y2="4"/></svg>
+      <span>Progress</span>
+    </button>
+    <button class="tab" data-tab="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+      <span>History</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ════════════════ PRACTICE TAB ════════════════ -->
+<main id="tab-practice" class="tab-panel active">
+
+  <!-- Practice pool — configuration, kept at the top and collapsed by default -->
+  <details class="filters-disclosure" id="filters-disclosure">
+    <summary>Practice pool</summary>
+    <section class="filters">
+      <div class="filter-group">
+        <div class="filter-label"><span>CAGED Forms</span><span class="filter-actions" data-target="form-chips"></span></div>
+        <div class="chip-row" id="form-chips"></div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label"><span>Chord Types</span><span class="filter-actions" data-target="type-chips"></span></div>
+        <div class="chip-row" id="type-chips"></div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label"><span>Position</span><span class="filter-actions" data-target="pos-chips"></span></div>
+        <div class="chip-row" id="pos-chips"></div>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label"><span>Root Notes</span><span class="filter-actions" data-target="root-chips"></span></div>
+        <div class="chip-row" id="root-chips"></div>
+      </div>
+    </section>
+  </details>
+
+  <!-- ONE console: the chord pair never moves. Only the title bar, the
+       countdown, and the control row underneath change as the drill runs. -->
+  <section class="stage">
+    <div class="stage-card">
+      <div class="card-head">
+        <span class="stage-label" id="stage-label">Up next</span>
+      </div>
+
+      <div class="pair-display visible" id="pair-display">
+        <div class="chord-card" id="card-a"></div>
+        <div class="pair-arrow">↔</div>
+        <div class="chord-card" id="card-b"></div>
+      </div>
+      <div class="empty" id="empty-state" style="display:none">No shapes match your pool below — turn some back on.</div>
+
+      <!-- idle controls: one primary action (Start); length + swap are quiet -->
+      <div class="stage-controls" id="idle-controls">
+        <button class="drill-settings" id="settings-btn" type="button" aria-label="Change drill setup">
+          <span class="drill-summary" id="drill-summary"></span>
+          <span class="ds-edit">Edit</span>
+        </button>
+        <button class="generate-btn" id="start-btn">Start drill</button>
+        <button class="link-btn" id="shuffle-btn" title="Show a different pair">try another pair</button>
+      </div>
+
+      <!-- active controls: two ways to end — finish & rate, or cancel out -->
+      <div class="stage-controls" id="active-controls" hidden>
+        <div class="countdown-wrap" id="countdown-wrap">
+          <div class="countdown" id="countdown">5:00</div>
+          <div class="countdown-bar"><div class="countdown-fill" id="countdown-fill"></div></div>
+        </div>
+        <div class="active-actions">
+          <button class="generate-btn compact" id="endearly-btn">End drill</button>
+        </div>
+      </div>
+
+      <!-- prep controls: the get-ready lead-in before the clock starts -->
+      <div class="stage-controls" id="prep-controls" hidden>
+        <div class="countdown-wrap">
+          <div class="prep-hint">Starting in</div>
+          <div class="countdown" id="prep-countdown">5</div>
+        </div>
+        <button class="link-btn danger" id="prep-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Today — one quiet line; the full log lives in Progress -->
+  <div class="today-line" id="today-section" style="display:none">
+    <span class="today-label">Today</span>
+    <span class="today-dots" id="today-dots"></span>
+    <span class="today-total" id="today-total"></span>
+  </div>
+</main>
+
+<!-- ════════════════ PROGRESS TAB ════════════════ -->
+<main id="tab-progress" class="tab-panel">
+  <div id="progress-content"></div>
+</main>
+
+<!-- ════════════════ HISTORY TAB ════════════════ -->
+<main id="tab-history" class="tab-panel">
+  <div id="history-content"></div>
+</main>
+
+<!-- drill setup modal — the pickers live here; the practice screen shows a summary -->
+<div class="modal-overlay" id="settings-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-title" id="settings-modal-title">Drill setup</div>
+    <div class="setup-field">
+      <span class="field-label">Session length</span>
+      <div class="seg-group" id="length-chips"></div>
+    </div>
+    <div class="setup-field">
+      <span class="field-label">Get ready</span>
+      <div class="seg-group" id="prep-chips"></div>
+    </div>
+    <div class="setup-field">
+      <span class="field-label">Tempo</span>
+      <div class="bpm-control">
+        <button class="bpm-step" id="bpm-down" aria-label="Slower">−</button>
+        <span class="bpm-readout"><b id="bpm-value">80</b> bpm</span>
+        <button class="bpm-step" id="bpm-up" aria-label="Faster">+</button>
+        <button class="bpm-toggle" id="metro-toggle" aria-label="Toggle metronome click" title="Metronome click">♪</button>
+      </div>
+    </div>
+    <button class="generate-btn compact" id="settings-done-btn">Done</button>
+  </div>
+</div>
+
+<!-- rating modal — pops when a drill ends (naturally or via "End drill") -->
+<div class="modal-overlay" id="rating-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rating-modal-title">
+    <div class="modal-title" id="rating-modal-title">How did that pair feel?</div>
+    <div class="rating-buttons">
+      <button class="rate-btn rate-0" data-rating="0">Struggled</button>
+      <button class="rate-btn rate-1" data-rating="1">OK</button>
+      <button class="rate-btn rate-2" data-rating="2">Nailed it</button>
+    </div>
+    <button class="link-btn" id="skip-rating-btn">Save without rating</button>
+    <button class="link-btn danger" id="cancel-btn">Cancel &amp; discard</button>
+  </div>
+</div>
+
+<!-- generic confirm dialog — in-app, styled like the rest (no browser prompts) -->
+<div class="modal-overlay" id="confirm-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div class="modal-title" id="confirm-modal-title">Are you sure?</div>
+    <div class="modal-text" id="confirm-modal-text"></div>
+    <div class="confirm-buttons">
+      <button class="danger-btn" id="confirm-ok-btn">Confirm</button>
+      <button class="link-btn" id="confirm-cancel-btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
