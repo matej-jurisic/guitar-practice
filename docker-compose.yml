@@ -4,6 +4,9 @@ services:
     container_name: guitar-practice
     ports:
       - "8080:8080"
+    environment:
+      # Streaks and the activity heatmap group sessions by server-local day.
+      TZ: Europe/Zagreb
     volumes:
       - guitar-data:/data
     restart: unless-stopped

@@ -51,6 +51,30 @@ if (!db.prepare(`PRAGMA table_info(sessions)`).all().some(c => c.name === 'bpm')
 const sig = c => `${c.form}:${c.type}:${c.pos}`;
 export const pairSig = (a, b) => `${sig(a)}>${sig(b)}`;
 
+// Shape catalog — must match OPEN_SHAPES in app.js. G and C forms only
+// carry the types that have a genuine open shape.
+const FORM_TYPES = {
+  E: ['maj', 'min', '7', 'min7', 'maj7', 'pow5'],
+  A: ['maj', 'min', '7', 'min7', 'maj7', 'pow5'],
+  D: ['maj', 'min', '7', 'min7', 'maj7', 'pow5'],
+  G: ['maj', '7', 'maj7'],
+  C: ['maj', '7', 'maj7'],
+};
+const ROOTS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const VALID_SIGS = new Set();
+for (const [form, types] of Object.entries(FORM_TYPES))
+  for (const type of types)
+    for (const pos of ['open', 'barre'])
+      VALID_SIGS.add(`${form}:${type}:${pos}`);
+
+// A chord is well-formed iff the form carries the type and pos matches the
+// root (the form's own root is the open position, every other root is barre).
+export function isValidChord(c) {
+  return !!c && ROOTS.includes(c.root)
+    && (FORM_TYPES[c.form] || []).includes(c.type)
+    && c.pos === (c.root === c.form ? 'open' : 'barre');
+}
+
 // ── prepared statements ──────────────────────────────────────────────
 const q = {
   insertSession: db.prepare(`
@@ -117,7 +141,6 @@ const q = {
 };
 
 const ALPHA = 0.4;           // EMA smoothing for the optional rating-based mastery
-const TOTAL_SIGNATURES = 60; // 5 forms × 6 types × {open, barre}
 
 // Record a completed practice session and roll it into the shape-pair stats.
 export function recordSession({ pair, duration_seconds, rating, bpm }) {
@@ -222,12 +245,13 @@ export function getStats() {
   const daily = q.dailyActivity.all(window);
   const { current, longest } = computeStreaks(q.practiceDays.all().map(r => r.day));
 
-  // signature coverage: how many of the 60 shapes have been practiced at least once
+  // signature coverage: how many current shapes have been practiced at least
+  // once (sessions on retired shapes stay in the log but don't count here)
   const { sigCounts } = getPracticeCounts();
-  const coveredSigs = Object.keys(sigCounts).length;
+  const coveredSigs = Object.keys(sigCounts).filter(s => VALID_SIGS.has(s)).length;
 
   return {
-    totals: { ...totals, covered_sigs: coveredSigs, total_sigs: TOTAL_SIGNATURES },
+    totals: { ...totals, covered_sigs: coveredSigs, total_sigs: VALID_SIGS.size },
     streak: { current, longest },
     mastery: {
       struggling: buckets.struggling || 0,

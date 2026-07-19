@@ -14,34 +14,31 @@ const OPEN_SHAPES = {
     pow5: { frets:[0,2,2,-1,-1,-1], barre_strings:null,  fingers:[0,1,2,0,0,0] },
   }},
   A: { root_string: 1, open_root_note: 'A', types: {
-    maj:  { frets:[-1,0,2,2,2,0],   barre_strings:null,  fingers:[0,0,1,2,3,0] },
-    min:  { frets:[-1,0,2,2,1,0],   barre_strings:null,  fingers:[0,0,2,3,1,0] },
-    '7':  { frets:[-1,0,2,0,2,0],   barre_strings:null,  fingers:[0,0,2,0,3,0] },
-    min7: { frets:[-1,0,2,0,1,0],   barre_strings:null,  fingers:[0,0,2,0,1,0] },
-    maj7: { frets:[-1,0,2,1,2,0],   barre_strings:null,  fingers:[0,0,3,1,4,0] },
+    maj:  { frets:[-1,0,2,2,2,0],   barre_strings:[1,5], fingers:[0,0,1,2,3,0] },
+    min:  { frets:[-1,0,2,2,1,0],   barre_strings:[1,5], fingers:[0,0,2,3,1,0] },
+    '7':  { frets:[-1,0,2,0,2,0],   barre_strings:[1,5], fingers:[0,0,2,0,3,0] },
+    min7: { frets:[-1,0,2,0,1,0],   barre_strings:[1,5], fingers:[0,0,2,0,1,0] },
+    maj7: { frets:[-1,0,2,1,2,0],   barre_strings:[1,5], fingers:[0,0,3,1,4,0] },
     pow5: { frets:[-1,0,2,2,-1,-1], barre_strings:null,  fingers:[0,0,1,2,0,0] },
   }},
+  // G and C forms carry only the types with a genuine open shape; their
+  // minor/min7/pow5 "shapes" were really the E/A-form barre chords and
+  // duplicated those entries for every root.
   G: { root_string: 0, open_root_note: 'G', types: {
     maj:  { frets:[3,2,0,0,0,3],    barre_strings:null,  fingers:[2,1,0,0,0,3] },
-    min:  { frets:[3,5,5,3,3,3],    barre_strings:[0,5], fingers:[1,3,4,1,1,1] },
     '7':  { frets:[3,2,0,0,0,1],    barre_strings:null,  fingers:[3,2,0,0,0,1] },
-    min7: { frets:[3,5,3,3,3,3],    barre_strings:[0,5], fingers:[1,3,1,1,1,1] },
     maj7: { frets:[3,2,0,0,0,2],    barre_strings:null,  fingers:[3,2,0,0,0,4] },
-    pow5: { frets:[3,5,5,-1,-1,-1], barre_strings:null,  fingers:[1,3,4,0,0,0] },
   }},
   C: { root_string: 1, open_root_note: 'C', types: {
     maj:  { frets:[-1,3,2,0,1,0],   barre_strings:null,  fingers:[0,3,2,0,1,0] },
-    min:  { frets:[-1,3,5,5,4,3],   barre_strings:[1,5], fingers:[0,1,3,4,2,1] },
     '7':  { frets:[-1,3,2,3,1,0],   barre_strings:null,  fingers:[0,3,2,4,1,0] },
-    min7: { frets:[-1,3,5,3,4,3],   barre_strings:[1,5], fingers:[0,1,3,1,2,1] },
     maj7: { frets:[-1,3,2,0,0,0],   barre_strings:null,  fingers:[0,3,2,0,0,0] },
-    pow5: { frets:[-1,3,5,5,-1,-1], barre_strings:null,  fingers:[0,1,3,4,0,0] },
   }},
   D: { root_string: 2, open_root_note: 'D', types: {
     maj:  { frets:[-1,-1,0,2,3,2],  barre_strings:null,  fingers:[0,0,0,1,3,2] },
     min:  { frets:[-1,-1,0,2,3,1],  barre_strings:null,  fingers:[0,0,0,2,3,1] },
     '7':  { frets:[-1,-1,0,2,1,2],  barre_strings:null,  fingers:[0,0,0,2,1,3] },
-    min7: { frets:[-1,-1,0,2,1,1],  barre_strings:[3,5], fingers:[0,0,0,2,1,1] },
+    min7: { frets:[-1,-1,0,2,1,1],  barre_strings:null,  fingers:[0,0,0,2,1,1] },
     maj7: { frets:[-1,-1,0,2,2,2],  barre_strings:null,  fingers:[0,0,0,1,2,3] },
     pow5: { frets:[-1,-1,0,2,3,-1], barre_strings:null,  fingers:[0,0,0,1,3,0] },
   }},
@@ -75,12 +72,17 @@ const ALL_POS   = ['open','barre'];
 
 const TYPE_SUFFIX = { maj:'', min:'m', '7':'7', min7:'m7', maj7:'maj7', pow5:'5' };
 
+// Not every form carries every type (G/C only have maj, 7, maj7).
+const hasShape = (form, type) => !!OPEN_SHAPES[form].types[type];
+
 const CHORD_DB = {};
 ALL_ROOTS.forEach(root => {
   CHORD_DB[root] = {};
   ALL_FORMS.forEach(form => {
     CHORD_DB[root][form] = {};
-    ALL_TYPES.forEach(type => { CHORD_DB[root][form][type] = buildChord(form, type, root); });
+    ALL_TYPES.forEach(type => {
+      if (hasShape(form, type)) CHORD_DB[root][form][type] = buildChord(form, type, root);
+    });
   });
 });
 
@@ -112,6 +114,7 @@ let activeTypes = new Set(ALL_TYPES);
 let activePos   = new Set(ALL_POS);
 let activeRoots = new Set(ALL_ROOTS);
 let sessionLengthMin = 5;
+const LENGTH_OPTS = [3, 5, 10];
 let prepSec = 5;                 // get-ready lead-in before the clock starts
 const PREP_OPTS = [0, 5, 10];
 let bpm = 80;                    // metronome tempo, carried into and saved with the drill
@@ -137,7 +140,7 @@ function loadPrefs() {
     if (Array.isArray(p.types)) activeTypes = restore(p.types, ALL_TYPES);
     if (Array.isArray(p.pos))   activePos   = restore(p.pos, ALL_POS);
     if (Array.isArray(p.roots)) activeRoots = restore(p.roots, ALL_ROOTS);
-    if (p.length) sessionLengthMin = p.length;
+    if (LENGTH_OPTS.includes(p.length)) sessionLengthMin = p.length;
     if (PREP_OPTS.includes(p.prep)) prepSec = p.prep;   // 0 is a valid choice
     if (Number.isFinite(p.bpm)) bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, p.bpm));
     if (typeof p.metronome === 'boolean') metronomeOn = p.metronome;
@@ -167,7 +170,7 @@ function initChips() {
   mk('root-chips', ALL_ROOTS, {}, activeRoots);
 
   // single-select segmented controls: session length and the get-ready lead-in
-  buildSegs('length-chips', [[3, '3 min'], [5, '5 min'], [10, '10 min']],
+  buildSegs('length-chips', LENGTH_OPTS.map(v => [v, `${v} min`]),
             () => sessionLengthMin, v => { sessionLengthMin = v; });
   buildSegs('prep-chips', [[0, 'Off'], [5, '5s'], [10, '10s']],
             () => prepSec, v => { prepSec = v; });
@@ -239,6 +242,7 @@ function eligibleSignatures() {
   const sigs = [];
   for (const form of activeForms) {
     for (const type of activeTypes) {
+      if (!hasShape(form, type)) continue;
       if (activePos.has('open') && activeRoots.has(form)) sigs.push({ form, type, pos:'open' });
       if (activePos.has('barre') && [...activeRoots].some(r => r !== form)) sigs.push({ form, type, pos:'barre' });
     }
@@ -464,6 +468,7 @@ function updateMetroUI() {
 
 function setBpm(v) {
   bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, v));
+  if (active && metronomeOn) active.bpm = bpm;   // keep the logged tempo current
   updateMetroUI();
   updateDrillSummary();
   savePrefs();
@@ -474,6 +479,9 @@ function setBpm(v) {
 // starts/stops a live preview (idle) or mutes/unmutes an in-progress drill.
 function toggleMetronome() {
   metronomeOn = !metronomeOn;
+  // turned on mid-drill: the drill did use the click, so log its tempo
+  // (turning off keeps the last tempo it ran at)
+  if (active && metronomeOn) active.bpm = bpm;
   updateMetroUI();
   updateDrillSummary();
   savePrefs();
@@ -808,6 +816,7 @@ async function deleteHistoryEntry(id) {
   try {
     await api.remove(id);
     await refreshCounts();
+    seedToday();      // the deleted drill may have been one of today's dots
     renderHistory();
   } catch (e) {
     console.warn('Could not delete drill.', e);
@@ -902,6 +911,264 @@ function historyHTML(sessions) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// QUIZ — two ephemeral recognition drills, scored only for the current run:
+//   identify: shown a diagram, pick root/form/type (multiple choice)
+//   build:    told the chord, tap the fretboard to draw it, auto-graded
+// Both draw their pool from the same filters as the Practice tab.
+// ═══════════════════════════════════════════════════════════════════
+const QUIZ_TYPE_LABEL = { maj:'maj', min:'min', '7':'7', min7:'m7', maj7:'maj7', pow5:'5' };
+
+let quizMode = 'identify';
+let quizCurrent = null;                 // { root, form, type, pos }
+let quizSelect = { root:null, form:null, type:null };  // identify picks
+let quizFrets = null;                   // build input: [6] of null|-1|0|fret(abs)
+let quizChecked = false;
+let quizScore = { correct:0, total:0 };
+
+const shuffle = a => { for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
+
+// Chords the current filters allow — same pool logic the drill selector uses.
+function quizPool() {
+  const list = [];
+  for (const form of activeForms)
+    for (const type of activeTypes) {
+      if (!hasShape(form, type)) continue;
+      for (const root of activeRoots) {
+        const pos = root === form ? 'open' : 'barre';
+        if (activePos.has(pos)) list.push({ root, form, type, pos });
+      }
+    }
+  return list;
+}
+
+// The 4-fret window a chord renders in (mirrors drawDiagram's own logic).
+function chordStartFret(chord) {
+  const played = chord.frets.filter(f => f > 0);
+  const minF = played.length ? Math.min(...played) : 1;
+  const maxF = played.length ? Math.max(...played) : 4;
+  let start = 1;
+  if (maxF > 4) start = minF;
+  if (chord.barre && chord.barre.fret < start) start = chord.barre.fret;
+  return start;
+}
+
+function renderQuiz() {
+  if (!quizCurrent) newQuestion();
+  else updateQuizScore();
+}
+
+function updateQuizScore() {
+  document.getElementById('quiz-score').textContent =
+    quizScore.total ? `${quizScore.correct}/${quizScore.total}` : '';
+}
+
+function newQuestion() {
+  quizChecked = false;
+  const body = document.getElementById('quiz-body');
+  const pool = quizPool();
+  if (!pool.length) {
+    quizCurrent = null;
+    document.getElementById('quiz-label').textContent = '';
+    body.innerHTML = `<div class="empty">No shapes match your practice pool — open Practice ▸ Practice pool and turn some on.</div>`;
+    return;
+  }
+  quizCurrent = pool[Math.floor(Math.random() * pool.length)];
+  if (quizMode === 'identify') { quizSelect = { root:null, form:null, type:null }; renderIdentify(); }
+  else                        { quizFrets = [null,null,null,null,null,null]; renderBuild(); }
+  updateQuizScore();
+}
+
+// ── identify: diagram + three multiple-choice rows ──
+function mcRow(attr, label, opts, fmt) {
+  return `<div class="mc-group">
+    <span class="mc-label">${label}</span>
+    <div class="mc-opts">${opts.map(o => `<button class="mc-opt" data-attr="${attr}" data-val="${o}">${fmt(o)}</button>`).join('')}</div>
+  </div>`;
+}
+
+function renderIdentify() {
+  const c = quizCurrent;
+  const chord = CHORD_DB[c.root][c.form][c.type];
+  const rootOpts = shuffle([c.root, ...shuffle(ALL_ROOTS.filter(r => r !== c.root)).slice(0, 3)]);
+  document.getElementById('quiz-label').textContent = 'Name this chord';
+
+  const body = document.getElementById('quiz-body');
+  body.innerHTML = `
+    <div class="fret-diagram quiz-diagram">${drawDiagram(chord)}</div>
+    ${mcRow('root', 'Root', rootOpts, x => x)}
+    ${mcRow('form', 'Form', ALL_FORMS, x => x + '-form')}
+    ${mcRow('type', 'Type', ALL_TYPES, x => QUIZ_TYPE_LABEL[x])}
+    <div class="quiz-actions"><button class="generate-btn compact" id="quiz-check" disabled>Check</button></div>
+    <div class="quiz-feedback" id="quiz-feedback"></div>`;
+
+  body.querySelectorAll('.mc-opt').forEach(b => b.onclick = () => onPick(b));
+  document.getElementById('quiz-check').onclick = onCheckOrNext;
+}
+
+function onPick(b) {
+  if (quizChecked) return;
+  const attr = b.dataset.attr;
+  quizSelect[attr] = b.dataset.val;
+  document.querySelectorAll(`.mc-opt[data-attr="${attr}"]`).forEach(x => x.classList.toggle('active', x === b));
+  document.getElementById('quiz-check').disabled =
+    !(quizSelect.root && quizSelect.form && quizSelect.type);
+}
+
+function checkIdentify() {
+  const c = quizCurrent;
+  quizScore.total++;
+  const right = quizSelect.root === c.root && quizSelect.form === c.form && quizSelect.type === c.type;
+  if (right) quizScore.correct++;
+
+  const mark = (attr, correctVal) => {
+    document.querySelectorAll(`.mc-opt[data-attr="${attr}"]`).forEach(x => {
+      x.disabled = true;
+      if (x.dataset.val === correctVal) x.classList.add('correct');
+      else if (x.classList.contains('active')) x.classList.add('wrong');
+    });
+  };
+  mark('root', c.root); mark('form', c.form); mark('type', c.type);
+  quizFeedback(right, c);
+}
+
+// ── build: told the chord, tap an interactive fretboard, auto-grade ──
+function renderBuild() {
+  const c = quizCurrent;
+  const chord = CHORD_DB[c.root][c.form][c.type];
+  const startFret = chordStartFret(chord);
+  document.getElementById('quiz-label').textContent = 'Draw this chord';
+
+  const body = document.getElementById('quiz-body');
+  body.innerHTML = `
+    <div class="quiz-target">
+      <div class="chord-name">${c.root}<span class="quality">${TYPE_SUFFIX[c.type]}</span></div>
+      <div class="chord-caption">${c.form}-form · ${c.pos}</div>
+    </div>
+    <div class="fb-input" id="fb-input">${buildBoardSVG(startFret, quizFrets, {})}</div>
+    <div class="fb-hint">Tap a fret to place a finger · tap above the nut for open ○ / muted ✕</div>
+    <div class="quiz-actions"><button class="generate-btn compact" id="quiz-check">Check</button></div>
+    <div class="quiz-feedback" id="quiz-feedback"></div>`;
+
+  wireBoard(startFret);
+  document.getElementById('quiz-check').onclick = onCheckOrNext;
+}
+
+// Rebound after every re-render, since setting innerHTML drops the old handler.
+function wireBoard(startFret) {
+  const svg = document.querySelector('#fb-input .fb-svg');
+  svg.onclick = e => {
+    if (quizChecked) return;
+    const t = e.target.closest('[data-act]');
+    if (!t) return;
+    const s = +t.dataset.s;
+    if (t.dataset.act === 'mark') {
+      const v = quizFrets[s];
+      quizFrets[s] = v === 0 ? -1 : v === -1 ? null : 0;   // cycle: unset→open→mute→unset
+    } else {
+      const f = +t.dataset.f;
+      quizFrets[s] = quizFrets[s] === f ? null : f;        // tap again to clear
+    }
+    document.getElementById('fb-input').innerHTML = buildBoardSVG(startFret, quizFrets, {});
+    wireBoard(startFret);
+  };
+}
+
+function checkBuild() {
+  const c = quizCurrent;
+  const chord = CHORD_DB[c.root][c.form][c.type];
+  const answer = chord.frets;
+  const startFret = chordStartFret(chord);
+  quizScore.total++;
+  const right = answer.every((f, s) => quizFrets[s] === f);
+  if (right) quizScore.correct++;
+  document.getElementById('fb-input').innerHTML = buildBoardSVG(startFret, quizFrets, { reveal:true, answer });
+  quizFeedback(right, c);
+}
+
+// Interactive (or revealed) fretboard. Interactive: draws the user's marks in
+// amber over transparent tap targets. Reveal: answer in green, user's misses in red.
+function buildBoardSVG(startFret, uf, { reveal = false, answer = null } = {}) {
+  const W=200, H=238, LEFT=34, RIGHT=W-16, TOP=52, BOT=H-24, NS=6, NF=4;
+  const colW = (RIGHT - LEFT) / (NS - 1);
+  const rowH = (BOT - TOP) / NF;
+  const strX = i => LEFT + i * colW;
+  const rowY = fr => TOP + fr * rowH;          // top edge of fret row fr (0..3)
+  const dotY = fr => TOP + (fr + 0.5) * rowH;  // centre of fret row
+  const markY = TOP - 18;
+  const AMBER = '#e8a045', GREEN = '#63c07f', RED = '#e0685a';
+
+  const dot  = (x, y, c) => `<circle cx="${x}" cy="${y}" r="9" fill="${c}"/>`;
+  const open = (x, c)    => `<circle cx="${x}" cy="${markY}" r="6" fill="none" stroke="${c}" stroke-width="2"/>`;
+  const mute = (x, c)    => `<text x="${x}" y="${markY+4}" text-anchor="middle" font-size="13" fill="${c}" font-family="sans-serif">✕</text>`;
+  const drawVal = (i, v, c) => {
+    if (v == null) return '';
+    const x = strX(i);
+    if (v === 0)  return open(x, c);
+    if (v === -1) return mute(x, c);
+    const fr = v - startFret;
+    return (fr < 0 || fr >= NF) ? '' : dot(x, dotY(fr), c);
+  };
+
+  let s = `<svg class="fb-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  if (startFret > 1) s += `<text x="${LEFT-8}" y="${dotY(0)+4}" text-anchor="end" font-size="11" fill="#8a8a9c" font-family="Space Mono,monospace">${startFret}fr</text>`;
+  for (let f = 0; f <= NF; f++) {
+    const y = rowY(f), nut = f === 0 && startFret === 1;
+    s += `<line x1="${LEFT}" y1="${y}" x2="${RIGHT}" y2="${y}" stroke="${nut?'#c8b890':'#3a3830'}" stroke-width="${nut?3:1}"/>`;
+  }
+  for (let i = 0; i < NS; i++) s += `<line x1="${strX(i)}" y1="${TOP}" x2="${strX(i)}" y2="${BOT}" stroke="#4a4a5a" stroke-width="1"/>`;
+
+  if (!reveal) {
+    for (let i = 0; i < NS; i++) {
+      s += drawVal(i, uf[i], AMBER);
+      s += `<rect data-act="mark" data-s="${i}" x="${strX(i)-14}" y="${markY-14}" width="28" height="26" fill="transparent" style="cursor:pointer"/>`;
+      for (let fr = 0; fr < NF; fr++)
+        s += `<rect data-act="cell" data-s="${i}" data-f="${startFret+fr}" x="${strX(i)-colW/2}" y="${rowY(fr)}" width="${colW}" height="${rowH}" fill="transparent" style="cursor:pointer"/>`;
+    }
+  } else {
+    for (let i = 0; i < NS; i++) {
+      s += drawVal(i, answer[i], GREEN);
+      if (uf[i] !== answer[i]) s += drawVal(i, uf[i], RED);
+    }
+  }
+  return s + `</svg>`;
+}
+
+// ── shared: check-then-advance button, feedback line, mode switch ──
+function onCheckOrNext() {
+  if (quizChecked) { newQuestion(); return; }
+  quizChecked = true;
+  if (quizMode === 'identify') checkIdentify(); else checkBuild();
+  const btn = document.getElementById('quiz-check');
+  btn.textContent = 'Next'; btn.disabled = false;
+  updateQuizScore();
+}
+
+function quizFeedback(right, c) {
+  const el = document.getElementById('quiz-feedback');
+  el.className = 'quiz-feedback ' + (right ? 'good' : 'bad');
+  el.innerHTML = right
+    ? '✓ Correct'
+    : `✗ ${c.root}<span class="quality">${TYPE_SUFFIX[c.type]}</span> · ${c.form}-form · ${c.pos}`;
+}
+
+function buildQuizModes() {
+  const row = document.getElementById('quiz-mode-chips');
+  [['identify', 'Identify'], ['build', 'Draw']].forEach(([val, label]) => {
+    const b = document.createElement('button');
+    b.className = 'seg' + (val === quizMode ? ' active' : '');
+    b.textContent = label;
+    b.onclick = () => {
+      if (val === quizMode) return;
+      quizMode = val;
+      row.querySelectorAll('.seg').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      newQuestion();
+    };
+    row.appendChild(b);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // TABS
 // ═══════════════════════════════════════════════════════════════════
 function switchTab(name) {
@@ -910,14 +1177,17 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
   if (name === 'progress') renderDashboard();
   else if (name === 'history') renderHistory();
+  else if (name === 'quiz') renderQuiz();
 }
 
 // Seed today's list from the server so a page reload keeps today's drills.
+// Uses the full history (not the stats endpoint's 8-row recents) so a heavy
+// practice day isn't truncated.
 async function seedToday() {
   try {
-    const s = await api.stats();
+    const history = await api.history();
     const todayISO = localISO(new Date());
-    todays = s.recentSessions
+    todays = history
       .filter(r => localISO(parseUTC(r.started_at)) === todayISO)
       .map(r => ({
         when: parseUTC(r.started_at),
@@ -938,6 +1208,7 @@ async function seedToday() {
 async function init() {
   loadPrefs();
   initChips();
+  buildQuizModes();
   updateMetroUI();
   updateDrillSummary();
   await refreshCounts();
@@ -965,7 +1236,10 @@ async function init() {
 
   document.addEventListener('keydown', e => {
     if (e.target !== document.body) return;
-    if (currentView === 'idle' && e.code === 'Space') { e.preventDefault(); startDrill(); }
+    if (currentView === 'idle' && e.code === 'Space') {
+      if (document.body.classList.contains('modal-open')) return;   // settings/confirm open
+      e.preventDefault(); startDrill();
+    }
     else if (currentView === 'rating' && ['Digit1','Digit2','Digit3'].includes(e.code)) {
       submitSession(Number(e.code.slice(-1)) - 1);
     }

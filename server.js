@@ -1,7 +1,7 @@
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { recordSession, getPracticeCounts, getStats, getAllSessions, deleteSession } from './db.js';
+import { recordSession, getPracticeCounts, getStats, getAllSessions, deleteSession, isValidChord } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,8 +15,8 @@ const api = express.Router();
 // Record a completed 5-minute (or ended-early) single-pair session.
 api.post('/sessions', (req, res) => {
   const { pair, duration_seconds, rating, bpm } = req.body || {};
-  if (!pair?.a?.form || !pair?.b?.form || !pair.a.pos || !pair.b.pos) {
-    return res.status(400).json({ error: 'pair {a,b} with form/type/pos/root is required' });
+  if (!isValidChord(pair?.a) || !isValidChord(pair?.b)) {
+    return res.status(400).json({ error: 'pair {a,b} must each be a known root/form/type/pos combination' });
   }
   res.json(recordSession({ pair, duration_seconds, rating, bpm }));
 });
