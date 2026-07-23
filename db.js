@@ -100,7 +100,8 @@ const q = {
        mastery           = @mastery,
        last_practiced_at = datetime('now')`),
 
-  allStats: db.prepare(`SELECT pair_sig, a_sig, b_sig, times_practiced FROM sig_pair_stats`),
+  allStats: db.prepare(`SELECT pair_sig, a_sig, b_sig, times_practiced, last_practiced_at FROM sig_pair_stats`),
+  allPairStats: db.prepare(`SELECT a_form, a_type, a_pos, b_form, b_type, b_pos, times_practiced, mastery FROM sig_pair_stats`),
 
   leastPracticed: db.prepare(`SELECT * FROM sig_pair_stats ORDER BY times_practiced ASC, last_practiced_at ASC LIMIT ?`),
   mostPracticed:  db.prepare(`SELECT * FROM sig_pair_stats ORDER BY times_practiced DESC LIMIT ?`),
@@ -183,19 +184,28 @@ export function recordSession({ pair, duration_seconds, rating, bpm }) {
   return q.getStat.get(key);
 }
 
-// Counts the client needs to choose the least-practiced pair:
+// Counts (+ recency) the client needs to choose the least-practiced pair:
 //   pairCounts[pair_sig]  – times that exact shape-pair was practiced
 //   sigCounts[signature]  – times that individual shape appeared (as a or b)
+//   pairLast[pair_sig]    – when that shape-pair was last practiced
+//   sigLast[signature]    – when that individual shape was last practiced (as a or b)
+// last/pairLast feed the client's recency-decay so a shape that hasn't been
+// touched in a long time resurfaces even if its raw count isn't the lowest.
 export function getPracticeCounts() {
   const rows = q.allStats.all();
   const pairCounts = {};
   const sigCounts = {};
+  const pairLast = {};
+  const sigLast = {};
   for (const row of rows) {
     pairCounts[row.pair_sig] = row.times_practiced;
+    pairLast[row.pair_sig] = row.last_practiced_at;
     sigCounts[row.a_sig] = (sigCounts[row.a_sig] || 0) + row.times_practiced;
     sigCounts[row.b_sig] = (sigCounts[row.b_sig] || 0) + row.times_practiced;
+    if (!sigLast[row.a_sig] || row.last_practiced_at > sigLast[row.a_sig]) sigLast[row.a_sig] = row.last_practiced_at;
+    if (!sigLast[row.b_sig] || row.last_practiced_at > sigLast[row.b_sig]) sigLast[row.b_sig] = row.last_practiced_at;
   }
-  return { pairCounts, sigCounts };
+  return { pairCounts, sigCounts, pairLast, sigLast };
 }
 
 // Full drill log, newest first (bounded so a runaway history can't blow up).
@@ -262,6 +272,9 @@ export function getStats() {
     leastPracticed: q.leastPracticed.all(8),
     mostPracticed:  q.mostPracticed.all(8),
     recentSessions: q.recentSessions.all(8),
+    // Full (uncapped) pair list — the skill-level breakdown lives client-side
+    // (LEVELS is defined in app.js), so it needs every pair to bucket by level.
+    pairStats: q.allPairStats.all(),
   };
 }
 

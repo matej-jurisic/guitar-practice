@@ -24,9 +24,35 @@
   --red:        #e0685a;
   --red-hi:     #ec7d70;
   --red-dim:    #6e2b23;   /* hard drop shadow under a red block button */
+  --track:      #17171c;   /* recessed trough behind progress fills */
+  --tabbar-bg:  rgba(16, 16, 20, 0.94); /* mobile bottom tab bar, blurred */
   --maxw:   660px;
   --mono: 'Space Mono', ui-monospace, monospace;
   --sans: 'Space Grotesk', sans-serif;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg:         #f5f1e7;
+  --surface:    #fffdf9;
+  --surface-2:  #ece5d5;
+  --border:     #d9d0ba;
+  --line-hi:    #b6a988;
+  --muted:      #9c917c;
+  --text-dim:   #6b6252;
+  --text:       #2c2620;
+  --text-hi:    #14110c;
+  --amber:      #a8641b;
+  --amber-hi:   #8a5215;
+  --amber-dim:  #e3c495;
+  --wood:       #fffaf0;
+  --green:      #2e8a51;
+  --red:        #c2483a;
+  --red-hi:     #a83a2e;
+  --red-dim:    #f0c6bd;
+  --track:      #e6dfcd;
+  --tabbar-bg:  rgba(255, 253, 249, 0.94);
+  color-scheme: light;
 }
 
 html { scrollbar-gutter: stable; }
@@ -34,6 +60,7 @@ html, body {
   background: var(--bg); color: var(--text);
   font-family: var(--mono);
   min-height: 100vh; min-height: 100dvh;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 body {
   display: flex; flex-direction: column; align-items: center;
@@ -74,6 +101,19 @@ button { font: inherit; touch-action: manipulation; }
 .tab svg { width: 15px; height: 15px; flex-shrink: 0; }
 .tab:hover { color: var(--text); background: var(--surface-2); }
 .tab.active { color: var(--wood); background: var(--amber); border-color: var(--amber); }
+
+/* ── theme toggle: same square-button language as a tab ── */
+.theme-toggle {
+  display: flex; align-items: center; justify-content: center;
+  width: 42px; min-height: 42px; flex-shrink: 0;
+  background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.theme-toggle:hover { color: var(--amber); background: var(--surface-2); }
+.theme-toggle svg { width: 16px; height: 16px; }
+.theme-toggle .theme-icon-light { display: none; }
+:root[data-theme="light"] .theme-toggle .theme-icon-dark { display: none; }
+:root[data-theme="light"] .theme-toggle .theme-icon-light { display: block; }
 
 .tab-panel { display: none; flex-direction: column; align-items: center; gap: 1.4rem; width: 100%; padding: 0 1rem; }
 .tab-panel.active { display: flex; }
@@ -118,11 +158,26 @@ button { font: inherit; touch-action: manipulation; }
 .chord-name { font-family: var(--sans); font-size: 1.8rem; font-weight: 700; color: var(--text-hi); letter-spacing: -0.01em; line-height: 1; }
 .chord-name .quality { font-size: 1rem; font-weight: 500; color: var(--amber); margin-left: 0.05rem; }
 .chord-caption { font-size: 0.62rem; font-family: var(--mono); color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+/* semitone / degree / note stacked per chord tone, columns laid out
+   left-to-right across the row so each tone reads top-to-bottom */
+.chord-formula { display: flex; justify-content: center; align-items: center; gap: 0.55rem; font-family: var(--mono); }
+.cf-col { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+.cf-semi { font-size: 0.56rem; color: var(--text-dim); }
+.cf-deg { font-size: 0.6rem; color: var(--text-dim); }
+.cf-note { font-size: 0.68rem; color: var(--amber); font-weight: 700; }
+/* leading gutter naming each row, set off from the tone columns by a rule */
+.cf-labels {
+  padding-right: 0.5rem; margin-right: 0.05rem;
+  border-right: 1px solid var(--border);
+}
+.cf-labels span { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 
 .pair-arrow { display: flex; align-items: center; color: var(--amber); font-size: 1.3rem; flex-shrink: 0; align-self: center; padding-bottom: 2.4rem; }
 
 /* square-cornered diagram frame */
-.fret-diagram { width: clamp(104px, 30vw, 136px); aspect-ratio: 4 / 5; flex-shrink: 0; }
+/* fills whatever the flex layout actually leaves it (can't overflow by
+   construction), capped so it doesn't balloon on wide viewports */
+.fret-diagram { width: 100%; max-width: 176px; aspect-ratio: 4 / 5; }
 svg.fret-svg { width: 100%; height: 100%; overflow: visible; }
 
 /* ── idle controls: one primary action (Start), everything else quiet ── */
@@ -233,12 +288,12 @@ svg.fret-svg { width: 100%; height: 100%; overflow: visible; }
   font-family: var(--mono); font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   transition: all 0.1s;
 }
-.rate-0 { border-color: rgba(224, 104, 90, 0.55);  color: var(--red); }
-.rate-1 { border-color: rgba(234, 166, 74, 0.55);  color: var(--amber); }
-.rate-2 { border-color: rgba(99, 192, 127, 0.55);  color: var(--green); }
-.rate-0:hover, .rate-0:active { border-color: var(--red);   background: rgba(224, 104, 90, 0.14); }
-.rate-1:hover, .rate-1:active { border-color: var(--amber); background: rgba(234, 166, 74, 0.14); }
-.rate-2:hover, .rate-2:active { border-color: var(--green); background: rgba(99, 192, 127, 0.14); }
+.rate-0 { border-color: color-mix(in srgb, var(--red) 55%, transparent);   color: var(--red); }
+.rate-1 { border-color: color-mix(in srgb, var(--amber) 55%, transparent); color: var(--amber); }
+.rate-2 { border-color: color-mix(in srgb, var(--green) 55%, transparent); color: var(--green); }
+.rate-0:hover, .rate-0:active { border-color: var(--red);   background: color-mix(in srgb, var(--red) 14%, transparent); }
+.rate-1:hover, .rate-1:active { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.rate-2:hover, .rate-2:active { border-color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
 
 /* ── today: one quiet summary line ── */
 .today-line {
@@ -289,6 +344,68 @@ svg.fret-svg { width: 100%; height: 100%; overflow: visible; }
 .chip:hover { border-color: var(--text-dim); color: var(--text); }
 .chip.active { background: var(--amber); border-color: var(--amber); color: var(--wood); font-weight: 700; }
 
+/* skill-level chip: two fused blocks — the level itself, and a narrow
+   "what's in this level" info block glued to its right edge. The info block
+   overlaps the main block's border by 1px so the shared edge is a single
+   line; whichever side is hovered gets z-index so its border draws whole,
+   instead of the seam picking up a stray dim border from its neighbor. */
+.level-chip-group { display: inline-flex; }
+.level-chip-main, .level-chip-info { position: relative; }
+.level-chip-main:hover, .level-chip-main:focus-visible,
+.level-chip-info:hover, .level-chip-info:focus-visible { z-index: 1; }
+.level-chip-info {
+  margin-left: -1px;
+  padding-left: 0.55rem; padding-right: 0.55rem;
+  color: var(--text-dim); opacity: 0.8;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.level-chip-info:hover { opacity: 1; }
+.level-chip-info span {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.1em; height: 1.1em; border-radius: 50%;
+  border: 1px solid currentColor; font-size: 0.85em;
+  line-height: 1;
+}
+
+.level-info-modal { max-width: 480px; }
+.level-info-list {
+  display: flex; flex-direction: column; gap: 0.5rem; max-height: 50vh;
+  overflow-y: auto; text-align: left; padding-right: 0.6rem;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.level-info-list::-webkit-scrollbar { width: 7px; }
+.level-info-list::-webkit-scrollbar-track { background: transparent; }
+.level-info-list::-webkit-scrollbar-thumb { background: var(--border); }
+.level-info-list::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+.level-info-section {
+  font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--amber); margin-top: 0.3rem;
+}
+.level-info-section:first-child { margin-top: 0; }
+.level-shape-group { border-bottom: 1px solid var(--border); padding-bottom: 0.45rem; }
+.level-shape-group:last-child { border-bottom: none; padding-bottom: 0; }
+.level-shape-title {
+  font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 0.25rem;
+}
+.level-shape-chords { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+/* chord-link: a little block naming a chord that opens the chord-popup
+   modal — used wherever a chord is named, not just the level-info dialog */
+.chord-link {
+  padding: 0.2rem 0.5rem; min-height: 0;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font-size: 0.76rem; font-family: var(--mono);
+  cursor: pointer; transition: all 0.12s;
+}
+.chord-link:hover, .chord-link:focus-visible { border-color: var(--amber); color: var(--amber); }
+
+.chord-popup-modal { max-width: 260px; align-items: center; }
+/* standalone popup isn't sharing a row with a sibling card + arrow, so it
+   can afford more width than the paired practice-screen diagrams */
+.chord-popup-modal .fret-diagram { max-width: 220px; }
+
 /* ════════ PROGRESS DASHBOARD ════════ */
 #progress-content, #history-content { width: 100%; max-width: var(--maxw); display: flex; flex-direction: column; gap: 1.2rem; }
 
@@ -323,8 +440,21 @@ details.panel > summary.panel-title:hover { color: var(--text); background: var(
 .mastery-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.62rem; color: var(--text-dim); }
 .mastery-legend i { width: 10px; height: 10px; display: inline-block; margin-right: 0.3rem; vertical-align: middle; }
 
-.coverage-bar { display: flex; height: 22px; overflow: hidden; background: #17171c; border: 1px solid var(--border); }
+.coverage-bar { display: flex; height: 22px; overflow: hidden; background: var(--track); border: 1px solid var(--border); }
 .coverage-fill { background: var(--amber); display: flex; align-items: center; justify-content: flex-end; padding-right: 0.5rem; font-family: var(--mono); font-size: 0.6rem; color: var(--wood); font-weight: 700; transition: width 0.4s; }
+
+.level-stats { display: flex; flex-direction: column; }
+.level-stat-row { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+.level-stat-row:last-child { padding-bottom: 0; border-bottom: none; }
+.level-stat-row:first-child { padding-top: 0; }
+.level-stat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; font-family: var(--mono); }
+.level-stat-head .lvl-name { color: var(--text); font-size: 0.76rem; font-weight: 700; }
+.level-stat-head .lvl-cov { color: var(--text-dim); font-size: 0.62rem; letter-spacing: 0.04em; white-space: nowrap; }
+.coverage-bar.mini { height: 10px; }
+.coverage-bar.mini .coverage-fill { padding-right: 0; }
+.level-stat-mastery { display: flex; gap: 0.9rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.6rem; color: var(--text-dim); }
+.level-stat-mastery i { width: 8px; height: 8px; display: inline-block; margin-right: 0.3rem; vertical-align: middle; }
+.level-stat-mastery.muted { color: var(--muted); }
 
 .pair-list { display: flex; flex-direction: column; }
 .pair-list-item { display: flex; align-items: center; gap: 0.7rem; font-family: var(--mono); font-size: 0.74rem; padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
@@ -340,6 +470,8 @@ details.panel > summary.panel-title:hover { color: var(--text); background: var(
 .session-row .hi-rate { flex-shrink: 0; }
 .session-row .sr-date { color: var(--text); min-width: 8rem; flex-shrink: 0; }
 .session-row .sr-meta { color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .sr-meta .chord-link { margin: 0 0.15rem; padding: 0.05rem 0.35rem; font-size: 0.7rem; vertical-align: middle; }
+.session-row .sr-meta .sr-shape { color: var(--muted); margin-right: 0.3rem; }
 .session-row .sr-del {
   flex-shrink: 0; background: none; border: none; color: var(--muted); cursor: pointer;
   font-family: var(--mono); font-size: 0.85rem; line-height: 1; padding: 0.35rem 0.5rem; min-height: 32px;
@@ -403,7 +535,7 @@ body.modal-open { overflow: hidden; }
   .tabs {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
     gap: 0;
-    background: rgba(16, 16, 20, 0.94);
+    background: var(--tabbar-bg);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
     border-top: 1px solid var(--line-hi);
   }
@@ -417,7 +549,8 @@ body.modal-open { overflow: hidden; }
 
   .stage-card { padding: 0 0.9rem 1.3rem; }
   .card-head { margin: 0 -0.9rem; padding: 0.55rem 0.9rem; }
-  .pair-arrow { font-size: 1.1rem; }
+  .pair-display { gap: clamp(0.5rem, 3vw, 1rem); }
+  .pair-arrow { font-size: 0.95rem; }
   .chord-name { font-size: 1.5rem; }
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
 

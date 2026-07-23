@@ -75,6 +75,83 @@ const TYPE_SUFFIX = { maj:'', min:'m', '7':'7', min7:'m7', maj7:'maj7', pow5:'5'
 // Not every form carries every type (G/C only have maj, 7, maj7).
 const hasShape = (form, type) => !!OPEN_SHAPES[form].types[type];
 
+// ── skill-level presets ──────────────────────────────────────────────
+// A rough teaching order: open majors, then minors, then barre chords
+// introduced one shape at a time (E majors, E minors, A, D), then dominant/
+// minor 7ths, then the rarer stuff (maj7, pow5, G/C barre). Each step roughly
+// doubles the pool at most, instead of jumping straight from a handful of
+// open chords to the full barre set. These just set the existing filter
+// chips to a curated combination; the chips underneath stay fully editable.
+const LEVELS = [
+  { label: 'Open',      desc: 'Open major chords only — E, A, D, G, C forms.',
+    forms: ['E','A','D','G','C'], types: ['maj'], pos: ['open'] },
+  { label: '+Minors',   desc: 'Add open minor chords.',
+    forms: ['E','A','D','G','C'], types: ['maj','min'], pos: ['open'] },
+  { label: 'E-Barre',   desc: 'Introduce barre chords with the E shape — majors only, all roots.',
+    forms: ['E'], types: ['maj'], pos: ['open','barre'] },
+  { label: '+E Minor',  desc: 'Add E-shape minor barre chords.',
+    forms: ['E'], types: ['maj','min'], pos: ['open','barre'] },
+  { label: '+A-Barre',  desc: 'Add the A-shape barre chords, majors and minors.',
+    forms: ['E','A'], types: ['maj','min'], pos: ['open','barre'] },
+  { label: '+D-Barre',  desc: 'Add the D-shape barre chords, majors and minors.',
+    forms: ['E','A','D'], types: ['maj','min'], pos: ['open','barre'] },
+  { label: '+7ths',     desc: 'Add dominant 7th and minor 7th chords, open and barre.',
+    forms: ['E','A','D'], types: ['maj','min','7','min7'], pos: ['open','barre'] },
+  { label: '+Maj7/5',   desc: 'Add major 7th and power (5) chords, open and barre.',
+    forms: ['E','A','D'], types: ALL_TYPES, pos: ['open','barre'] },
+  { label: 'Full',      desc: 'The full CAGED set — every form, type, and position.',
+    forms: ALL_FORMS, types: ALL_TYPES, pos: ALL_POS },
+];
+const TYPE_LABEL = { maj:'Major', min:'Minor', '7':'Dominant 7', min7:'Minor 7', maj7:'Major 7', pow5:'Power chord' };
+
+// Scale-degree formula (semitones from root) for each chord type, used to
+// label diagrams with the interval formula and the actual note names.
+const TYPE_FORMULA = {
+  maj:  { degrees: ['1','3','5'],        semitones: [0,4,7]     },
+  min:  { degrees: ['1','♭3','5'],       semitones: [0,3,7]     },
+  '7':  { degrees: ['1','3','5','♭7'],   semitones: [0,4,7,10]  },
+  min7: { degrees: ['1','♭3','5','♭7'],  semitones: [0,3,7,10]  },
+  maj7: { degrees: ['1','3','5','7'],    semitones: [0,4,7,11]  },
+  pow5: { degrees: ['1','5'],            semitones: [0,7]       },
+};
+
+// Every concrete chord a level's forms/types/pos combination covers. Open
+// shapes have exactly one root (the form letter), so those are grouped by
+// type across all forms in one line (E,A,D,G,C major → one row, not five).
+// Barre shapes still need one row per form (the shape and root set differ
+// per form), each covering the other 11 roots.
+function levelChordGroups(lvl) {
+  const openByType = new Map();   // type -> [forms with that open shape]
+  const barre = [];
+  for (const form of lvl.forms) {
+    for (const type of lvl.types) {
+      if (!hasShape(form, type)) continue;
+      if (lvl.pos.includes('open')) {
+        if (!openByType.has(type)) openByType.set(type, []);
+        openByType.get(type).push(form);
+      }
+      if (lvl.pos.includes('barre')) barre.push({ form, type, roots: ALL_ROOTS.filter(r => r !== form) });
+    }
+  }
+  const open = [...openByType.entries()].map(([type, forms]) => ({ type, forms }));
+  return { open, barre };
+}
+
+// The shape signatures (form:type:pos, same format as sigStr/a_sig/b_sig)
+// a level's forms/types/pos combination covers — used by the progress
+// dashboard to bucket practice history per skill level.
+function levelSigSet(lvl) {
+  const sigs = new Set();
+  for (const form of lvl.forms) {
+    for (const type of lvl.types) {
+      if (!hasShape(form, type)) continue;
+      if (lvl.pos.includes('open'))  sigs.add(`${form}:${type}:open`);
+      if (lvl.pos.includes('barre')) sigs.add(`${form}:${type}:barre`);
+    }
+  }
+  return sigs;
+}
+
 const CHORD_DB = {};
 ALL_ROOTS.forEach(root => {
   CHORD_DB[root] = {};
@@ -109,9 +186,13 @@ const api = {
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 const PREFS_KEY = 'guitar-practice-prefs';
-let activeForms = new Set(ALL_FORMS);
-let activeTypes = new Set(ALL_TYPES);
-let activePos   = new Set(ALL_POS);
+const THEME_KEY = 'guitar-practice-theme';
+// Fresh installs start at level 1 (open majors) rather than the full CAGED
+// pool — landing a new player straight in every form/type/root/position at
+// once is what made practice feel overwhelming. Saved prefs override this.
+let activeForms = new Set(LEVELS[0].forms);
+let activeTypes = new Set(LEVELS[0].types);
+let activePos   = new Set(LEVELS[0].pos);
 let activeRoots = new Set(ALL_ROOTS);
 let sessionLengthMin = 5;
 const LENGTH_OPTS = [3, 5, 10];
@@ -123,6 +204,8 @@ const BPM_MIN = 40, BPM_MAX = 240, BPM_STEP = 5;
 
 let pairCounts = {};   // pair_sig -> times practiced
 let sigCounts  = {};   // signature -> times practiced (as either chord)
+let pairLast   = {};   // pair_sig -> Date last practiced (recency weighting)
+let sigLast    = {};   // signature -> Date last practiced (as either chord)
 
 let nextPair = null;   // previewed least-practiced pair (idle)
 let active = null;     // { pair, startedAt, total }
@@ -155,9 +238,34 @@ function savePrefs() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// THEME — dark by default; the inline head script already set the
+// attribute before first paint, this just wires the toggle + syncs
+// the browser chrome color and toggle label to match.
+// ═══════════════════════════════════════════════════════════════════
+function isLightTheme() { return document.documentElement.dataset.theme === 'light'; }
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === 'light' ? '#f5f1e7' : '#0b0b0d';
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.setAttribute('aria-label', theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode');
+}
+
+function toggleTheme() {
+  const next = isLightTheme() ? 'dark' : 'light';
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+  // heatmap cell colors are baked into generated SVG, not CSS — repaint if visible
+  if (document.getElementById('tab-progress').classList.contains('active')) renderDashboard();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // CHIPS / FILTERS
 // ═══════════════════════════════════════════════════════════════════
 function initChips() {
+  buildLevelRow();
+
   const mk = (rowId, items, labels, set) => {
     const row = document.getElementById(rowId);
     const chips = items.map(v => chip(v, labels[v] ?? v, set));
@@ -174,6 +282,94 @@ function initChips() {
             () => sessionLengthMin, v => { sessionLengthMin = v; });
   buildSegs('prep-chips', [[0, 'Off'], [5, '5s'], [10, '10s']],
             () => prepSec, v => { prepSec = v; });
+}
+
+// Skill-level row: applies a curated forms/types/pos combination in one tap.
+// Not a persistent mode — picking a level just sets the chips below, which
+// stay individually editable afterward (same as the "all"/"none" bulk buttons).
+function buildLevelRow() {
+  const row = document.getElementById('level-chips');
+  LEVELS.forEach((lvl, i) => {
+    const group = document.createElement('div');
+    group.className = 'level-chip-group';
+
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'chip level-chip-main';
+    main.textContent = lvl.label;
+    main.title = lvl.desc;
+    main.onclick = () => {
+      applyLevel(i);
+      row.querySelectorAll('.level-chip-main').forEach(x => x.classList.remove('active'));
+      main.classList.add('active');
+    };
+
+    const info = document.createElement('button');
+    info.type = 'button';
+    info.className = 'chip level-chip-info';
+    info.innerHTML = '<span>i</span>';
+    info.setAttribute('aria-label', `What's in ${lvl.label}`);
+    info.onclick = () => openLevelInfo(i);
+
+    group.append(main, info);
+    row.appendChild(group);
+  });
+}
+
+function openLevelInfo(i) {
+  const lvl = LEVELS[i];
+  const { open, barre } = levelChordGroups(lvl);
+  const total = open.reduce((n, g) => n + g.forms.length, 0) + barre.reduce((n, g) => n + g.roots.length, 0);
+  document.getElementById('level-info-title').textContent = `${lvl.label} — ${total} chords`;
+  document.getElementById('level-info-desc').textContent = lvl.desc;
+
+  const openHTML = open.length ? `
+    <div class="level-info-section">Open</div>
+    ${open.map(g => `
+      <div class="level-shape-group">
+        <div class="level-shape-title">${TYPE_LABEL[g.type]}</div>
+        <div class="level-shape-chords">${g.forms.map(f => chordLink(f, f, g.type)).join('')}</div>
+      </div>`).join('')}` : '';
+
+  const barreHTML = barre.length ? `
+    <div class="level-info-section">Barre</div>
+    ${barre.map(g => `
+      <div class="level-shape-group">
+        <div class="level-shape-title">${g.form}-shape ${TYPE_LABEL[g.type]}</div>
+        <div class="level-shape-chords">${g.roots.map(r => chordLink(r, g.form, g.type)).join('')}</div>
+      </div>`).join('')}` : '';
+
+  document.getElementById('level-info-list').innerHTML = openHTML + barreHTML;
+  document.getElementById('level-info-modal').hidden = false;
+  document.body.classList.add('modal-open');
+}
+function closeLevelInfo() {
+  document.getElementById('level-info-modal').hidden = true;
+  document.body.classList.remove('modal-open');
+}
+
+function applyLevel(i) {
+  const lvl = LEVELS[i];
+  activeForms = new Set(lvl.forms);
+  activeTypes = new Set(lvl.types);
+  activePos   = new Set(lvl.pos);
+  syncChipRows();
+  savePrefs();
+  if (active || pending) return;   // don't disrupt a running drill
+  renderIdle(true);
+}
+
+// Re-sync chip active states after activeForms/etc. change from outside the
+// chip's own click handler (i.e. from applyLevel). Relies on each row's
+// children being in the same order as the items array used to build it.
+function syncChipRows() {
+  [['form-chips', ALL_FORMS, activeForms],
+   ['type-chips', ALL_TYPES, activeTypes],
+   ['pos-chips',  ALL_POS,   activePos],
+   ['root-chips', ALL_ROOTS, activeRoots]].forEach(([rowId, items, set]) => {
+    const row = document.getElementById(rowId);
+    [...row.children].forEach((c, idx) => c.classList.toggle('active', set.has(items[idx])));
+  });
 }
 
 function buildSegs(rowId, options, get, set) {
@@ -261,8 +457,18 @@ function materialize(s) {
   return { root, form: s.form, type: s.type, pos: s.pos };
 }
 
-// Pick the directional shape-pair with the fewest practices.
-// Tie-break: fewest combined single-shape practices, then random.
+// A practice's weight halves every RECENCY_HALF_LIFE_DAYS, so a shape drilled
+// a lot a while ago still cedes its turn to one that hasn't been touched
+// since — pure counts alone would let an old streak block a shape forever.
+const RECENCY_HALF_LIFE_DAYS = 14;
+function decayedCount(rawCount, lastDate) {
+  if (!rawCount || !lastDate) return rawCount || 0;
+  const days = (Date.now() - lastDate.getTime()) / 86400000;
+  return rawCount * Math.pow(0.5, Math.max(0, days) / RECENCY_HALF_LIFE_DAYS);
+}
+
+// Pick the directional shape-pair with the fewest recency-weighted practices.
+// Tie-break: fewest combined recency-weighted single-shape practices, then random.
 function selectPair() {
   const sigs = eligibleSignatures();
   if (sigs.length < 2) return null;
@@ -273,8 +479,9 @@ function selectPair() {
       if (i === j) continue;
       const a = sigs[i], b = sigs[j];
       const sa = sigStr(a), sb = sigStr(b);
-      const pc = pairCounts[`${sa}>${sb}`] || 0;
-      const sc = (sigCounts[sa] || 0) + (sigCounts[sb] || 0);
+      const pairKey = `${sa}>${sb}`;
+      const pc = decayedCount(pairCounts[pairKey] || 0, pairLast[pairKey]);
+      const sc = decayedCount(sigCounts[sa] || 0, sigLast[sa]) + decayedCount(sigCounts[sb] || 0, sigLast[sb]);
       if (pc < bestPc || (pc === bestPc && sc < bestSc)) {
         bestPc = pc; bestSc = sc; best = [[a, b]];
       } else if (pc === bestPc && sc === bestSc) {
@@ -289,6 +496,11 @@ function selectPair() {
 // ═══════════════════════════════════════════════════════════════════
 // DIAGRAM RENDERER (preserved)
 // ═══════════════════════════════════════════════════════════════════
+// Standard tuning, low string (index 0, drawn on the left) to high string
+// (index 5) — matches the string order used throughout OPEN_SHAPES/frets.
+const STANDARD_TUNING = ['E','A','D','G','B','E'];
+const noteAt = (stringIdx, fret) => CHROMATIC[(CHROMATIC.indexOf(STANDARD_TUNING[stringIdx]) + fret) % 12];
+
 function drawDiagram(chord) {
   const frets = chord.frets;
   const barre = chord.barre;
@@ -310,7 +522,8 @@ function drawDiagram(chord) {
   let svg = `<svg class="fret-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
 
   if (startFret > 1) {
-    svg += `<text x="${LEFT-4}" y="${fretY(startFret)+4}" text-anchor="end" font-size="9" fill="#6b6b80" font-family="Space Mono,monospace">${startFret}fr</text>`;
+    // sits clear of the barre pill, which can pad up to 8.5px past string 0 (LEFT)
+    svg += `<text x="${LEFT-11}" y="${fretY(startFret)+4}" text-anchor="end" font-size="9" fill="#6b6b80" font-family="Space Mono,monospace">${startFret}fr</text>`;
   }
   for (let f=0; f<=NF; f++) {
     const y = TOP + f*((BOT-TOP)/NF);
@@ -322,39 +535,85 @@ function drawDiagram(chord) {
   }
   if (barre && barre.fret >= startFret && barre.fret <= endFret) {
     const y = fretY(barre.fret);
-    svg += `<rect x="${strX(barre.from)}" y="${y-7}" width="${strX(barre.to)-strX(barre.from)}" height="14" rx="7" fill="#e8a045"/>`;
+    // pad the pill past the outer strings by the same margin a lone fretted
+    // dot gets, so notes on the first/last string don't land on the rounded
+    // cap (where the fill curves away and the letter loses its background)
+    const barrePad = 8.5;
+    svg += `<rect x="${strX(barre.from)-barrePad}" y="${y-7}" width="${strX(barre.to)-strX(barre.from)+barrePad*2}" height="14" rx="7" fill="#e8a045"/>`;
+    for (let s=barre.from; s<=barre.to; s++) {
+      if (frets[s] === barre.fret) {
+        svg += `<text x="${strX(s)}" y="${y+2.8}" text-anchor="middle" font-size="7.5" fill="#2e2518" font-family="Space Mono,monospace">${noteAt(s, barre.fret)}</text>`;
+      }
+    }
   }
   for (let s=0; s<NS; s++) {
     const f = frets[s], x = strX(s);
     if (f === -1) {
       svg += `<text x="${x}" y="${TOP-6}" text-anchor="middle" font-size="10" fill="#6b6b80" font-family="sans-serif">✕</text>`;
     } else if (f === 0) {
-      svg += `<circle cx="${x}" cy="${TOP-8}" r="4.5" fill="none" stroke="#8a8070" stroke-width="1.5"/>`;
+      svg += `<circle cx="${x}" cy="${TOP-8}" r="5.5" fill="none" stroke="#8a8070" stroke-width="1.5"/>` +
+             `<text x="${x}" y="${TOP-8+2.8}" text-anchor="middle" font-size="7" fill="#c8b890" font-family="Space Mono,monospace">${noteAt(s, 0)}</text>`;
     }
   }
   for (let s=0; s<NS; s++) {
     const f = frets[s];
     if (f > 0 && f >= startFret && f <= endFret) {
       const inBarre = barre && barre.fret === f && s >= barre.from && s <= barre.to;
-      if (!inBarre) svg += `<circle cx="${strX(s)}" cy="${fretY(f)}" r="7.5" fill="#e8a045"/>`;
+      if (!inBarre) {
+        svg += `<circle cx="${strX(s)}" cy="${fretY(f)}" r="8.5" fill="#e8a045"/>` +
+               `<text x="${strX(s)}" y="${fretY(f)+2.8}" text-anchor="middle" font-size="7.5" fill="#2e2518" font-family="Space Mono,monospace">${noteAt(s, f)}</text>`;
+      }
     }
   }
   svg += `</svg>`;
   return svg;
 }
 
-// One card = diagram, name, one caption line. Everything else was noise.
+// One card = diagram (each played string labeled with its note), name,
+// one caption line, and a 3-row formula breakdown (semitone / degree / note
+// per chord tone, aligned in columns so it reads across, not just down).
 function renderCard(container, entry) {
   const chord = CHORD_DB[entry.root][entry.form][entry.type];
+  const formula = TYPE_FORMULA[entry.type];
+  const rootIdx = CHROMATIC.indexOf(entry.root);
+  const cols = formula.semitones.map((s, i) => `
+    <div class="cf-col">
+      <span class="cf-semi">${s}</span>
+      <span class="cf-deg">${formula.degrees[i]}</span>
+      <span class="cf-note">${CHROMATIC[(rootIdx + s) % 12]}</span>
+    </div>`).join('');
   container.innerHTML = `
     <div class="fret-diagram">${drawDiagram(chord)}</div>
     <div class="chord-name">${entry.root}<span class="quality">${TYPE_SUFFIX[entry.type]}</span></div>
-    <div class="chord-caption">${entry.form}-form · ${entry.pos}</div>`;
+    <div class="chord-caption">${entry.form}-form · ${entry.pos} · ${TYPE_LABEL[entry.type]}</div>
+    <div class="chord-formula">
+      <div class="cf-col cf-labels"><span class="cf-semi">st</span><span class="cf-deg">deg</span><span class="cf-note">note</span></div>
+      ${cols}
+    </div>`;
 }
 
 function renderPair(pair) {
   renderCard(document.getElementById('card-a'), pair.a);
   renderCard(document.getElementById('card-b'), pair.b);
+}
+
+// Clickable chord name — anywhere a chord is named as text, swap in this
+// button instead and it opens a popup showing the shape. Reusable outside
+// the level-info dialog: just needs the root, the CAGED form/shape, and type.
+function chordLink(root, form, type) {
+  return `<button type="button" class="chord-link" data-root="${root}" data-form="${form}" data-type="${type}">${root}${TYPE_SUFFIX[type]}</button>`;
+}
+
+function openChordPopup(root, form, type) {
+  renderCard(document.getElementById('chord-popup-card'), { root, form, type, pos: posOf(root, form) });
+  document.getElementById('chord-popup-modal').hidden = false;
+  document.body.classList.add('modal-open');
+}
+function closeChordPopup() {
+  document.getElementById('chord-popup-modal').hidden = true;
+  // another modal (e.g. the level-info dialog this was opened from) may
+  // still be showing underneath — only drop the scroll lock if nothing is
+  if (!document.querySelector('.modal-overlay:not([hidden])')) document.body.classList.remove('modal-open');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -670,9 +929,13 @@ async function submitSession(rating) {
 
   // optimistic local count update so the next pick reflects this drill instantly
   const sa = sigStr(pair.a), sb = sigStr(pair.b);
+  const now = new Date();
   pairCounts[`${sa}>${sb}`] = (pairCounts[`${sa}>${sb}`] || 0) + 1;
   sigCounts[sa] = (sigCounts[sa] || 0) + 1;
   sigCounts[sb] = (sigCounts[sb] || 0) + 1;
+  pairLast[`${sa}>${sb}`] = now;
+  sigLast[sa] = now;
+  sigLast[sb] = now;
 
   todays.unshift({ when: new Date(), pair, rating, duration });
   renderToday();
@@ -699,8 +962,13 @@ function renderToday() {
 }
 
 async function refreshCounts() {
-  try { const c = await api.counts(); pairCounts = c.pairCounts || {}; sigCounts = c.sigCounts || {}; }
-  catch { /* keep local optimistic counts */ }
+  try {
+    const c = await api.counts();
+    pairCounts = c.pairCounts || {};
+    sigCounts = c.sigCounts || {};
+    pairLast = Object.fromEntries(Object.entries(c.pairLast || {}).map(([k, v]) => [k, parseUTC(v)]));
+    sigLast = Object.fromEntries(Object.entries(c.sigLast || {}).map(([k, v]) => [k, parseUTC(v)]));
+  } catch { /* keep local optimistic counts */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -755,15 +1023,19 @@ async function renderDashboard() {
       <div class="panel-title">Activity · last 17 weeks</div>
       <div class="heatmap-wrap">${heatmapSVG(s.daily)}</div>
       <div class="heatmap-legend">less
-        <i style="background:#1c1c22"></i><i style="background:#3a2a10"></i>
-        <i style="background:#7a4f18"></i><i style="background:#b97c28"></i>
-        <i style="background:#e8a045"></i>more</div>
+        ${HEAT_SCALE[isLightTheme() ? 'light' : 'dark'].map(c => `<i style="background:${c}"></i>`).join('')}
+        more</div>
     </div>
 
     <div class="panel">
       <div class="panel-title">Practice minutes · last 14 days</div>
       ${barChartHTML(s.daily, 14)}
     </div>
+
+    <details class="panel collapsible">
+      <summary class="panel-title">By skill level</summary>
+      <div class="panel-body level-stats">${levelStatsHTML(s.pairStats)}</div>
+    </details>
 
     <details class="panel collapsible">
       <summary class="panel-title">Least practiced · the app targets these next</summary>
@@ -823,6 +1095,14 @@ async function deleteHistoryEntry(id) {
   }
 }
 
+// SVG cell fills can't reference CSS custom properties per-theme the way
+// legend swatches can, so the amber activity scale is duplicated here —
+// keep in sync with HEAT_SCALE below.
+const HEAT_SCALE = {
+  dark:  ['#1c1c22', '#3a2a10', '#7a4f18', '#b97c28', '#e8a045'],
+  light: ['#e6dfcd', '#e3c495', '#cf9a4e', '#a8641b', '#7d4a12'],
+};
+
 function heatmapSVG(daily) {
   const map = new Map(daily.map(d => [d.day, d]));
   const today = new Date();
@@ -833,13 +1113,14 @@ function heatmapSVG(daily) {
 
   let maxSecs = 1;
   daily.forEach(d => { if (d.secs > maxSecs) maxSecs = d.secs; });
+  const scale = HEAT_SCALE[isLightTheme() ? 'light' : 'dark'];
   const color = secs => {
-    if (!secs) return '#1c1c22';
+    if (!secs) return scale[0];
     const r = secs / maxSecs;
-    if (r < 0.25) return '#3a2a10';
-    if (r < 0.5)  return '#7a4f18';
-    if (r < 0.75) return '#b97c28';
-    return '#e8a045';
+    if (r < 0.25) return scale[1];
+    if (r < 0.5)  return scale[2];
+    if (r < 0.75) return scale[3];
+    return scale[4];
   };
 
   const CELL = 12, GAP = 3, cur = new Date(start), cells = [];
@@ -882,6 +1163,54 @@ function masteryBarHTML(m) {
   return `<div class="mastery-bar">${seg(m.struggling,'var(--red)')}${seg(m.learning,'var(--amber)')}${seg(m.mastered,'var(--green)')}</div>`;
 }
 
+// Aggregate shape coverage (from sigCounts) and pair mastery (from the full
+// pairStats list) against a signature set — only pairs whose *both* shapes
+// fall inside the set count. Levels are shown cumulatively (each level's set
+// is itself plus every level before it): tapping a level chip narrows the
+// *practice* pool to that level's own shapes (e.g. "E-Barre" drops back to
+// just the E form), but for a *progress* view "how am I doing by this point
+// in the curriculum" is what's useful, so the numbers should only grow.
+function levelStats(sigs, pairStats) {
+  let coveredSigs = 0;
+  sigs.forEach(s => { if (sigCounts[s]) coveredSigs++; });
+
+  let struggling = 0, learning = 0, mastered = 0;
+  for (const p of pairStats) {
+    if (!sigs.has(`${p.a_form}:${p.a_type}:${p.a_pos}`)) continue;
+    if (!sigs.has(`${p.b_form}:${p.b_type}:${p.b_pos}`)) continue;
+    if (p.mastery == null) continue;
+    if (p.mastery < 0.8) struggling++;
+    else if (p.mastery < 1.5) learning++;
+    else mastered++;
+  }
+  return { totalSigs: sigs.size, coveredSigs, struggling, learning, mastered };
+}
+
+function levelStatsHTML(pairStats) {
+  const cumulative = new Set();
+  return LEVELS.map(lvl => {
+    levelSigSet(lvl).forEach(s => cumulative.add(s));
+    const st = levelStats(cumulative, pairStats);
+    const pct = st.totalSigs ? Math.round((st.coveredSigs / st.totalSigs) * 100) : 0;
+    const rated = st.struggling + st.learning + st.mastered;
+    const masteryLine = rated ? `
+      <div class="level-stat-mastery">
+        ${st.struggling ? `<span><i style="background:var(--red)"></i>${st.struggling} struggling</span>` : ''}
+        ${st.learning   ? `<span><i style="background:var(--amber)"></i>${st.learning} learning</span>` : ''}
+        ${st.mastered   ? `<span><i style="background:var(--green)"></i>${st.mastered} mastered</span>` : ''}
+      </div>` : `<div class="level-stat-mastery muted">no rated pairs yet</div>`;
+    return `
+      <div class="level-stat-row">
+        <div class="level-stat-head">
+          <span class="lvl-name">${lvl.label}</span>
+          <span class="lvl-cov">${st.coveredSigs}/${st.totalSigs} techniques · ${pct}%</span>
+        </div>
+        <div class="coverage-bar mini"><div class="coverage-fill" style="width:${st.coveredSigs ? Math.max(pct, 4) : 0}%"></div></div>
+        ${masteryLine}
+      </div>`;
+  }).join('');
+}
+
 function pairListHTML(pairs) {
   if (!pairs?.length) return `<div class="dash-empty">Nothing yet.</div>`;
   return `<div class="pair-list">` + pairs.map(p => `
@@ -891,6 +1220,11 @@ function pairListHTML(pairs) {
       <span class="pl-meta">${p.times_practiced}×</span>
     </div>`).join('') + `</div>`;
 }
+
+// Each row's shape/pos still shown as text (that's the drilled property),
+// but the actual chord played is known here (unlike the signature-level
+// Progress lists), so it links to the diagram popup.
+const shapeLink = (o, p) => `${chordLink(o[p+'_root'], o[p+'_form'], o[p+'_type'])}<span class="sr-shape">${o[p+'_form']}-shape·${o[p+'_pos']}</span>`;
 
 // Full drill log, scrollable so it stays bounded, each row with a delete ✕.
 function historyHTML(sessions) {
@@ -904,268 +1238,10 @@ function historyHTML(sessions) {
     return `<div class="session-row">
       <span class="hi-rate" style="background:${dot(s.rating)};width:9px;height:9px"></span>
       <span class="sr-date">${date}</span>
-      <span class="sr-meta">${fmtDuration(s.duration_seconds)}${tempo} · ${shapeText(s,'a')} → ${shapeText(s,'b')}</span>
+      <span class="sr-meta">${fmtDuration(s.duration_seconds)}${tempo} · ${shapeLink(s,'a')} → ${shapeLink(s,'b')}</span>
       <button class="sr-del" data-id="${s.id}" title="Delete this drill" aria-label="Delete drill">✕</button>
     </div>`;
   }).join('') + `</div>`;
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// QUIZ — two ephemeral recognition drills, scored only for the current run:
-//   identify: shown a diagram, pick root/form/type (multiple choice)
-//   build:    told the chord, tap the fretboard to draw it, auto-graded
-// Both draw their pool from the same filters as the Practice tab.
-// ═══════════════════════════════════════════════════════════════════
-const QUIZ_TYPE_LABEL = { maj:'maj', min:'min', '7':'7', min7:'m7', maj7:'maj7', pow5:'5' };
-
-let quizMode = 'identify';
-let quizCurrent = null;                 // { root, form, type, pos }
-let quizSelect = { root:null, form:null, type:null };  // identify picks
-let quizFrets = null;                   // build input: [6] of null|-1|0|fret(abs)
-let quizChecked = false;
-let quizScore = { correct:0, total:0 };
-
-const shuffle = a => { for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
-
-// Chords the current filters allow — same pool logic the drill selector uses.
-function quizPool() {
-  const list = [];
-  for (const form of activeForms)
-    for (const type of activeTypes) {
-      if (!hasShape(form, type)) continue;
-      for (const root of activeRoots) {
-        const pos = root === form ? 'open' : 'barre';
-        if (activePos.has(pos)) list.push({ root, form, type, pos });
-      }
-    }
-  return list;
-}
-
-// The 4-fret window a chord renders in (mirrors drawDiagram's own logic).
-function chordStartFret(chord) {
-  const played = chord.frets.filter(f => f > 0);
-  const minF = played.length ? Math.min(...played) : 1;
-  const maxF = played.length ? Math.max(...played) : 4;
-  let start = 1;
-  if (maxF > 4) start = minF;
-  if (chord.barre && chord.barre.fret < start) start = chord.barre.fret;
-  return start;
-}
-
-function renderQuiz() {
-  if (!quizCurrent) newQuestion();
-  else updateQuizScore();
-}
-
-function updateQuizScore() {
-  document.getElementById('quiz-score').textContent =
-    quizScore.total ? `${quizScore.correct}/${quizScore.total}` : '';
-}
-
-function newQuestion() {
-  quizChecked = false;
-  const body = document.getElementById('quiz-body');
-  const pool = quizPool();
-  if (!pool.length) {
-    quizCurrent = null;
-    document.getElementById('quiz-label').textContent = '';
-    body.innerHTML = `<div class="empty">No shapes match your practice pool — open Practice ▸ Practice pool and turn some on.</div>`;
-    return;
-  }
-  quizCurrent = pool[Math.floor(Math.random() * pool.length)];
-  if (quizMode === 'identify') { quizSelect = { root:null, form:null, type:null }; renderIdentify(); }
-  else                        { quizFrets = [null,null,null,null,null,null]; renderBuild(); }
-  updateQuizScore();
-}
-
-// ── identify: diagram + three multiple-choice rows ──
-function mcRow(attr, label, opts, fmt) {
-  return `<div class="mc-group">
-    <span class="mc-label">${label}</span>
-    <div class="mc-opts">${opts.map(o => `<button class="mc-opt" data-attr="${attr}" data-val="${o}">${fmt(o)}</button>`).join('')}</div>
-  </div>`;
-}
-
-function renderIdentify() {
-  const c = quizCurrent;
-  const chord = CHORD_DB[c.root][c.form][c.type];
-  const rootOpts = shuffle([c.root, ...shuffle(ALL_ROOTS.filter(r => r !== c.root)).slice(0, 3)]);
-  document.getElementById('quiz-label').textContent = 'Name this chord';
-
-  const body = document.getElementById('quiz-body');
-  body.innerHTML = `
-    <div class="fret-diagram quiz-diagram">${drawDiagram(chord)}</div>
-    ${mcRow('root', 'Root', rootOpts, x => x)}
-    ${mcRow('form', 'Form', ALL_FORMS, x => x + '-form')}
-    ${mcRow('type', 'Type', ALL_TYPES, x => QUIZ_TYPE_LABEL[x])}
-    <div class="quiz-actions"><button class="generate-btn compact" id="quiz-check" disabled>Check</button></div>
-    <div class="quiz-feedback" id="quiz-feedback"></div>`;
-
-  body.querySelectorAll('.mc-opt').forEach(b => b.onclick = () => onPick(b));
-  document.getElementById('quiz-check').onclick = onCheckOrNext;
-}
-
-function onPick(b) {
-  if (quizChecked) return;
-  const attr = b.dataset.attr;
-  quizSelect[attr] = b.dataset.val;
-  document.querySelectorAll(`.mc-opt[data-attr="${attr}"]`).forEach(x => x.classList.toggle('active', x === b));
-  document.getElementById('quiz-check').disabled =
-    !(quizSelect.root && quizSelect.form && quizSelect.type);
-}
-
-function checkIdentify() {
-  const c = quizCurrent;
-  quizScore.total++;
-  const right = quizSelect.root === c.root && quizSelect.form === c.form && quizSelect.type === c.type;
-  if (right) quizScore.correct++;
-
-  const mark = (attr, correctVal) => {
-    document.querySelectorAll(`.mc-opt[data-attr="${attr}"]`).forEach(x => {
-      x.disabled = true;
-      if (x.dataset.val === correctVal) x.classList.add('correct');
-      else if (x.classList.contains('active')) x.classList.add('wrong');
-    });
-  };
-  mark('root', c.root); mark('form', c.form); mark('type', c.type);
-  quizFeedback(right, c);
-}
-
-// ── build: told the chord, tap an interactive fretboard, auto-grade ──
-function renderBuild() {
-  const c = quizCurrent;
-  const chord = CHORD_DB[c.root][c.form][c.type];
-  const startFret = chordStartFret(chord);
-  document.getElementById('quiz-label').textContent = 'Draw this chord';
-
-  const body = document.getElementById('quiz-body');
-  body.innerHTML = `
-    <div class="quiz-target">
-      <div class="chord-name">${c.root}<span class="quality">${TYPE_SUFFIX[c.type]}</span></div>
-      <div class="chord-caption">${c.form}-form · ${c.pos}</div>
-    </div>
-    <div class="fb-input" id="fb-input">${buildBoardSVG(startFret, quizFrets, {})}</div>
-    <div class="fb-hint">Tap a fret to place a finger · tap above the nut for open ○ / muted ✕</div>
-    <div class="quiz-actions"><button class="generate-btn compact" id="quiz-check">Check</button></div>
-    <div class="quiz-feedback" id="quiz-feedback"></div>`;
-
-  wireBoard(startFret);
-  document.getElementById('quiz-check').onclick = onCheckOrNext;
-}
-
-// Rebound after every re-render, since setting innerHTML drops the old handler.
-function wireBoard(startFret) {
-  const svg = document.querySelector('#fb-input .fb-svg');
-  svg.onclick = e => {
-    if (quizChecked) return;
-    const t = e.target.closest('[data-act]');
-    if (!t) return;
-    const s = +t.dataset.s;
-    if (t.dataset.act === 'mark') {
-      const v = quizFrets[s];
-      quizFrets[s] = v === 0 ? -1 : v === -1 ? null : 0;   // cycle: unset→open→mute→unset
-    } else {
-      const f = +t.dataset.f;
-      quizFrets[s] = quizFrets[s] === f ? null : f;        // tap again to clear
-    }
-    document.getElementById('fb-input').innerHTML = buildBoardSVG(startFret, quizFrets, {});
-    wireBoard(startFret);
-  };
-}
-
-function checkBuild() {
-  const c = quizCurrent;
-  const chord = CHORD_DB[c.root][c.form][c.type];
-  const answer = chord.frets;
-  const startFret = chordStartFret(chord);
-  quizScore.total++;
-  const right = answer.every((f, s) => quizFrets[s] === f);
-  if (right) quizScore.correct++;
-  document.getElementById('fb-input').innerHTML = buildBoardSVG(startFret, quizFrets, { reveal:true, answer });
-  quizFeedback(right, c);
-}
-
-// Interactive (or revealed) fretboard. Interactive: draws the user's marks in
-// amber over transparent tap targets. Reveal: answer in green, user's misses in red.
-function buildBoardSVG(startFret, uf, { reveal = false, answer = null } = {}) {
-  const W=200, H=238, LEFT=34, RIGHT=W-16, TOP=52, BOT=H-24, NS=6, NF=4;
-  const colW = (RIGHT - LEFT) / (NS - 1);
-  const rowH = (BOT - TOP) / NF;
-  const strX = i => LEFT + i * colW;
-  const rowY = fr => TOP + fr * rowH;          // top edge of fret row fr (0..3)
-  const dotY = fr => TOP + (fr + 0.5) * rowH;  // centre of fret row
-  const markY = TOP - 18;
-  const AMBER = '#e8a045', GREEN = '#63c07f', RED = '#e0685a';
-
-  const dot  = (x, y, c) => `<circle cx="${x}" cy="${y}" r="9" fill="${c}"/>`;
-  const open = (x, c)    => `<circle cx="${x}" cy="${markY}" r="6" fill="none" stroke="${c}" stroke-width="2"/>`;
-  const mute = (x, c)    => `<text x="${x}" y="${markY+4}" text-anchor="middle" font-size="13" fill="${c}" font-family="sans-serif">✕</text>`;
-  const drawVal = (i, v, c) => {
-    if (v == null) return '';
-    const x = strX(i);
-    if (v === 0)  return open(x, c);
-    if (v === -1) return mute(x, c);
-    const fr = v - startFret;
-    return (fr < 0 || fr >= NF) ? '' : dot(x, dotY(fr), c);
-  };
-
-  let s = `<svg class="fb-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
-  if (startFret > 1) s += `<text x="${LEFT-8}" y="${dotY(0)+4}" text-anchor="end" font-size="11" fill="#8a8a9c" font-family="Space Mono,monospace">${startFret}fr</text>`;
-  for (let f = 0; f <= NF; f++) {
-    const y = rowY(f), nut = f === 0 && startFret === 1;
-    s += `<line x1="${LEFT}" y1="${y}" x2="${RIGHT}" y2="${y}" stroke="${nut?'#c8b890':'#3a3830'}" stroke-width="${nut?3:1}"/>`;
-  }
-  for (let i = 0; i < NS; i++) s += `<line x1="${strX(i)}" y1="${TOP}" x2="${strX(i)}" y2="${BOT}" stroke="#4a4a5a" stroke-width="1"/>`;
-
-  if (!reveal) {
-    for (let i = 0; i < NS; i++) {
-      s += drawVal(i, uf[i], AMBER);
-      s += `<rect data-act="mark" data-s="${i}" x="${strX(i)-14}" y="${markY-14}" width="28" height="26" fill="transparent" style="cursor:pointer"/>`;
-      for (let fr = 0; fr < NF; fr++)
-        s += `<rect data-act="cell" data-s="${i}" data-f="${startFret+fr}" x="${strX(i)-colW/2}" y="${rowY(fr)}" width="${colW}" height="${rowH}" fill="transparent" style="cursor:pointer"/>`;
-    }
-  } else {
-    for (let i = 0; i < NS; i++) {
-      s += drawVal(i, answer[i], GREEN);
-      if (uf[i] !== answer[i]) s += drawVal(i, uf[i], RED);
-    }
-  }
-  return s + `</svg>`;
-}
-
-// ── shared: check-then-advance button, feedback line, mode switch ──
-function onCheckOrNext() {
-  if (quizChecked) { newQuestion(); return; }
-  quizChecked = true;
-  if (quizMode === 'identify') checkIdentify(); else checkBuild();
-  const btn = document.getElementById('quiz-check');
-  btn.textContent = 'Next'; btn.disabled = false;
-  updateQuizScore();
-}
-
-function quizFeedback(right, c) {
-  const el = document.getElementById('quiz-feedback');
-  el.className = 'quiz-feedback ' + (right ? 'good' : 'bad');
-  el.innerHTML = right
-    ? '✓ Correct'
-    : `✗ ${c.root}<span class="quality">${TYPE_SUFFIX[c.type]}</span> · ${c.form}-form · ${c.pos}`;
-}
-
-function buildQuizModes() {
-  const row = document.getElementById('quiz-mode-chips');
-  [['identify', 'Identify'], ['build', 'Draw']].forEach(([val, label]) => {
-    const b = document.createElement('button');
-    b.className = 'seg' + (val === quizMode ? ' active' : '');
-    b.textContent = label;
-    b.onclick = () => {
-      if (val === quizMode) return;
-      quizMode = val;
-      row.querySelectorAll('.seg').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      newQuestion();
-    };
-    row.appendChild(b);
-  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1177,7 +1253,6 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `tab-${name}`));
   if (name === 'progress') renderDashboard();
   else if (name === 'history') renderHistory();
-  else if (name === 'quiz') renderQuiz();
 }
 
 // Seed today's list from the server so a page reload keeps today's drills.
@@ -1206,9 +1281,10 @@ async function seedToday() {
 // WIRING
 // ═══════════════════════════════════════════════════════════════════
 async function init() {
+  applyTheme(document.documentElement.dataset.theme);
+  document.getElementById('theme-toggle').onclick = toggleTheme;
   loadPrefs();
   initChips();
-  buildQuizModes();
   updateMetroUI();
   updateDrillSummary();
   await refreshCounts();
@@ -1224,8 +1300,22 @@ async function init() {
   document.getElementById('settings-done-btn').onclick = closeSettings;
   const settingsOverlay = document.getElementById('settings-modal');
   settingsOverlay.onclick = e => { if (e.target === settingsOverlay) closeSettings(); };
+  document.getElementById('level-info-close-btn').onclick = closeLevelInfo;
+  const levelInfoOverlay = document.getElementById('level-info-modal');
+  levelInfoOverlay.onclick = e => { if (e.target === levelInfoOverlay) closeLevelInfo(); };
+  document.getElementById('chord-popup-close-btn').onclick = closeChordPopup;
+  const chordPopupOverlay = document.getElementById('chord-popup-modal');
+  chordPopupOverlay.onclick = e => { if (e.target === chordPopupOverlay) closeChordPopup(); };
+  // delegated: chord-link buttons are generated dynamically, wherever they're used
+  document.addEventListener('click', e => {
+    const link = e.target.closest('.chord-link');
+    if (link) openChordPopup(link.dataset.root, link.dataset.form, link.dataset.type);
+  });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !settingsOverlay.hidden) { e.preventDefault(); closeSettings(); }
+    if (e.key !== 'Escape') return;
+    if (!chordPopupOverlay.hidden) { e.preventDefault(); closeChordPopup(); }
+    else if (!settingsOverlay.hidden) { e.preventDefault(); closeSettings(); }
+    else if (!levelInfoOverlay.hidden) { e.preventDefault(); closeLevelInfo(); }
   });
   document.getElementById('endearly-btn').onclick = () => finishDrill('early');
   document.getElementById('cancel-btn').onclick = cancelDrill;
