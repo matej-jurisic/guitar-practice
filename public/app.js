@@ -1512,7 +1512,7 @@ function historyHTML(sessions) {
     return `<div class="session-row">
       <span class="hi-rate" style="background:${dot(s.rating)};width:9px;height:9px"></span>
       <span class="sr-date">${date}</span>
-      <span class="sr-meta">${fmtDuration(s.duration_seconds)}${tempo} · ${shapeLink(s,'a')} → ${shapeLink(s,'b')}</span>
+      <span class="sr-meta"><span class="sr-time">${fmtDuration(s.duration_seconds)}${tempo}</span><span class="sr-shapes">${shapeLink(s,'a')} → ${shapeLink(s,'b')}</span></span>
       <button class="sr-del" data-id="${s.id}" title="Delete this drill" aria-label="Delete drill">✕</button>
     </div>`;
   }).join('') + `</div>`;

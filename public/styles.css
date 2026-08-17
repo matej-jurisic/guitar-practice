@@ -487,6 +487,7 @@ details.panel > summary.panel-title:hover { color: var(--text); background: var(
 .session-row .sr-meta { color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-row .sr-meta .chord-link { margin: 0 0.15rem; padding: 0.05rem 0.35rem; font-size: 0.7rem; vertical-align: middle; }
 .session-row .sr-meta .sr-shape { color: var(--muted); margin-right: 0.3rem; }
+.session-row .sr-meta .sr-shapes::before { content: " · "; }
 .session-row .sr-del {
   flex-shrink: 0; background: none; border: none; color: var(--muted); cursor: pointer;
   font-family: var(--mono); font-size: 0.85rem; line-height: 1; padding: 0.35rem 0.5rem; min-height: 32px;
@@ -610,7 +611,12 @@ body.modal-open { overflow: hidden; }
   .session-row { flex-wrap: wrap; row-gap: 0.1rem; }
   .session-row .sr-date { flex: 1; min-width: 0; }
   .session-row .sr-del { order: 1; }
-  .session-row .sr-meta { order: 2; flex-basis: 100%; padding-left: 1.35rem; white-space: normal; }
+  .session-row .sr-meta {
+    order: 2; flex-basis: 100%; padding-left: 1.35rem; white-space: normal;
+    display: flex; flex-direction: column; gap: 0.15rem;
+  }
+  .session-row .sr-meta .sr-shapes { order: -1; }
+  .session-row .sr-meta .sr-shapes::before { content: none; }
 }
 
 /* very narrow: stack the rating buttons for bigger targets */
