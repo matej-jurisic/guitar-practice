@@ -46,9 +46,14 @@ const OPEN_SHAPES = {
 
 const ROOT_PITCH = { E:4, A:9, G:7, C:0, D:2 };
 
+// How far up the neck a form has to move to reach a root: 0 for the form's
+// own root (the open shape), 1-11 for every barre position. Doubles as the
+// chord's hand position, which is what pair spans are measured in.
+const shiftOf = (rootNote, form) => (CHROMATIC.indexOf(rootNote) - ROOT_PITCH[form] + 12) % 12;
+
 function buildChord(form, type, rootNote) {
   const tmpl = OPEN_SHAPES[form].types[type];
-  const shift = (CHROMATIC.indexOf(rootNote) - ROOT_PITCH[form] + 12) % 12;
+  const shift = shiftOf(rootNote, form);
 
   const newFrets = tmpl.frets.map(f => {
     if (f === -1) return -1;
@@ -194,6 +199,13 @@ let activeForms = new Set(LEVELS[0].forms);
 let activeTypes = new Set(LEVELS[0].types);
 let activePos   = new Set(LEVELS[0].pos);
 let activeRoots = new Set(ALL_ROOTS);
+// Widest gap allowed between the two chords' hand positions. Drawn
+// independently, the two roots can put one chord at fret 1 and the other at
+// fret 11 - a change nobody actually plays, and one that spends the drill
+// travelling the neck instead of forming the shapes. Changing shapes inside
+// one neck window is the CAGED skill worth the reps; 11 opts back out.
+const SPAN_OPTS = [3, 5, 7, 11];
+let maxSpan = 5;
 let sessionLengthMin = 5;
 const LENGTH_OPTS = [3, 5, 10];
 let prepSec = 5;                 // get-ready lead-in before the clock starts
@@ -223,6 +235,7 @@ function loadPrefs() {
     if (Array.isArray(p.types)) activeTypes = restore(p.types, ALL_TYPES);
     if (Array.isArray(p.pos))   activePos   = restore(p.pos, ALL_POS);
     if (Array.isArray(p.roots)) activeRoots = restore(p.roots, ALL_ROOTS);
+    if (SPAN_OPTS.includes(p.span)) maxSpan = p.span;
     if (LENGTH_OPTS.includes(p.length)) sessionLengthMin = p.length;
     if (PREP_OPTS.includes(p.prep)) prepSec = p.prep;   // 0 is a valid choice
     if (Number.isFinite(p.bpm)) bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, p.bpm));
@@ -232,7 +245,7 @@ function loadPrefs() {
 function savePrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify({
     forms:[...activeForms], types:[...activeTypes], pos:[...activePos],
-    roots:[...activeRoots], length: sessionLengthMin, prep: prepSec,
+    roots:[...activeRoots], span: maxSpan, length: sessionLengthMin, prep: prepSec,
     bpm, metronome: metronomeOn,
   }));
 }
@@ -276,6 +289,14 @@ function initChips() {
   mk('type-chips', ALL_TYPES, {}, activeTypes);
   mk('pos-chips',  ALL_POS,   {}, activePos);
   mk('root-chips', ALL_ROOTS, {}, activeRoots);
+
+  // Part of the pool, not the drill setup: it changes which pair comes up, so
+  // it re-picks the preview the way the chip rows do.
+  buildSegs('span-chips', SPAN_OPTS.map(v => [v, v >= 11 ? 'Any' : `${v} frets`]),
+            () => maxSpan, v => {
+              maxSpan = v;
+              if (!active && !pending) renderIdle(true);
+            });
 
   // single-select segmented controls: session length and the get-ready lead-in
   buildSegs('length-chips', LENGTH_OPTS.map(v => [v, `${v} min`]),
@@ -446,15 +467,31 @@ function eligibleSignatures() {
   return sigs;
 }
 
-function materialize(s) {
-  let root;
-  if (s.pos === 'open') {
-    root = s.form;                                   // the one root with shift 0
-  } else {
-    const opts = [...activeRoots].filter(r => r !== s.form);
-    root = opts[Math.floor(Math.random() * opts.length)];
+// Roots a signature can take: an open shape has exactly one (the form letter,
+// the only root with shift 0); a barre shape takes any other active root.
+// Never empty - eligibleSignatures already dropped barre sigs with no root left.
+function rootOptions(s) {
+  return s.pos === 'open' ? [s.form] : [...activeRoots].filter(r => r !== s.form);
+}
+
+// Both roots are chosen together, not one at a time, so the pair lands inside
+// one neck window (see maxSpan). When the active roots can't satisfy the span
+// at all - only F and A# selected with a 3-fret window, say - the closest
+// available gap wins rather than the pair being dropped.
+function materializePair(a, b) {
+  const within = [], closest = [];
+  let bestGap = Infinity;
+  for (const ra of rootOptions(a)) {
+    for (const rb of rootOptions(b)) {
+      const gap = Math.abs(shiftOf(ra, a.form) - shiftOf(rb, b.form));
+      if (gap <= maxSpan) within.push([ra, rb]);
+      if (gap < bestGap) { bestGap = gap; closest.length = 0; }
+      if (gap === bestGap) closest.push([ra, rb]);
+    }
   }
-  return { root, form: s.form, type: s.type, pos: s.pos };
+  const pool = within.length ? within : closest;
+  const [ra, rb] = pool[Math.floor(Math.random() * pool.length)];
+  return { a: { ...a, root: ra }, b: { ...b, root: rb } };
 }
 
 // A practice's weight halves every RECENCY_HALF_LIFE_DAYS, so a shape drilled
@@ -490,7 +527,7 @@ function selectPair() {
     }
   }
   const [a, b] = best[Math.floor(Math.random() * best.length)];
-  return { a: materialize(a), b: materialize(b) };
+  return materializePair(a, b);
 }
 
 // ═══════════════════════════════════════════════════════════════════

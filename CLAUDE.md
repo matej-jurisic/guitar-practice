@@ -16,6 +16,10 @@ to a homelab via Docker. See README.md for architecture and run commands.
 - **Least-practiced-first selection**: the app always serves the directional
   shape-pair with the fewest recorded practices, so weak spots and full
   fretboard coverage get filled in over time.
+- **Fret span** (`maxSpan` / `materializePair`): once the pair of *shapes* is
+  chosen, both roots are picked together so the two chords' hand positions sit
+  within N frets of each other (an open chord counts as position 0). Stops the
+  fret 1 ↔ fret 11 leaps that independent root draws produced. "Any" opts out.
 - **Levels** (`LEVELS` in `public/app.js`): curated filter-chip presets that
   gate the pool from open majors up to the full CAGED set, for progressive
   difficulty. Chips underneath stay individually editable after picking one.
