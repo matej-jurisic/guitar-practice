@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Single-user guitar practice web app (Node/Express + `node:sqlite`), deployed
-to a homelab via Docker. See README.md for architecture and run commands.
+Guitar practice web app (Node/Express + `node:sqlite`), deployed to a homelab
+via Docker. See README.md for architecture and run commands.
 
 ## Features (high level — check the code before relying on specifics)
 
@@ -29,8 +29,13 @@ to a homelab via Docker. See README.md for architecture and run commands.
 - **Drill log**: full session history on its own tab/list, each row
   individually deletable (deleting recomputes that pair's stats from
   remaining sessions).
-- No accounts/auth. Single SQLite file (`db.js`), REST API in `server.js`
-  (`/api/sessions`, `/api/practice-counts`, `/api/stats`).
+- **Users**: no accounts/auth, just "who's practicing". First load ever asks
+  for a name → that user is the admin (only they can add/remove users);
+  later loads pick from the list. The choice lives in `localStorage` and is
+  sent as an `X-User-Id` header; every practice route is scoped to it. All
+  history, stats and practice-pool prefs are per user.
+- Single SQLite file (`db.js`), REST API in `server.js` (`/api/users`,
+  `/api/sessions`, `/api/practice-counts`, `/api/stats`).
 
 ## Working style — read this before touching UI/UX work
 

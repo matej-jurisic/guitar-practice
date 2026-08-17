@@ -179,12 +179,29 @@ const pairSigStr = (a, b) => `${sigStr(a)}>${sigStr(b)}`;
 // ═══════════════════════════════════════════════════════════════════
 // API
 // ═══════════════════════════════════════════════════════════════════
+// Every practice route is scoped to whoever is practicing, sent as an
+// X-User-Id header (a profile switch, not auth — there are no passwords).
+// A 401 means the stored user is gone (deleted on another device): drop it
+// and reload straight into the picker.
+async function apiFetch(url, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (currentUser) headers['X-User-Id'] = currentUser.id;
+  const res = await fetch(url, { ...opts, headers });
+  if (res.status === 401) { handleUserGone(); throw new Error('unknown user'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
 const api = {
-  async record(body)        { return (await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })).json(); },
-  async counts()            { return (await fetch('/api/practice-counts')).json(); },
-  async stats()             { return (await fetch('/api/stats')).json(); },
-  async history()           { return (await fetch('/api/sessions')).json(); },
-  async remove(id)          { return (await fetch(`/api/sessions/${id}`, { method:'DELETE' })).json(); },
+  record(body)   { return apiFetch('/api/sessions', { method:'POST', body: JSON.stringify(body) }); },
+  counts()       { return apiFetch('/api/practice-counts'); },
+  stats()        { return apiFetch('/api/stats'); },
+  history()      { return apiFetch('/api/sessions'); },
+  remove(id)     { return apiFetch(`/api/sessions/${id}`, { method:'DELETE' }); },
+  users()        { return apiFetch('/api/users'); },
+  addUser(name)  { return apiFetch('/api/users', { method:'POST', body: JSON.stringify({ name }) }); },
+  delUser(id)    { return apiFetch(`/api/users/${id}`, { method:'DELETE' }); },
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -192,27 +209,30 @@ const api = {
 // ═══════════════════════════════════════════════════════════════════
 const PREFS_KEY = 'guitar-practice-prefs';
 const THEME_KEY = 'guitar-practice-theme';
-// Fresh installs start at level 1 (open majors) rather than the full CAGED
-// pool — landing a new player straight in every form/type/root/position at
-// once is what made practice feel overwhelming. Saved prefs override this.
-let activeForms = new Set(LEVELS[0].forms);
-let activeTypes = new Set(LEVELS[0].types);
-let activePos   = new Set(LEVELS[0].pos);
-let activeRoots = new Set(ALL_ROOTS);
+const USER_KEY  = 'guitar-practice-user';
+const LENGTH_OPTS = [3, 5, 10];
+const PREP_OPTS = [0, 5, 10];
+const BPM_MIN = 40, BPM_MAX = 240, BPM_STEP = 5;
 // Widest gap allowed between the two chords' hand positions. Drawn
 // independently, the two roots can put one chord at fret 1 and the other at
 // fret 11 - a change nobody actually plays, and one that spends the drill
 // travelling the neck instead of forming the shapes. Changing shapes inside
 // one neck window is the CAGED skill worth the reps; 11 opts back out.
 const SPAN_OPTS = [3, 5, 7, 11];
-let maxSpan = 5;
-let sessionLengthMin = 5;
-const LENGTH_OPTS = [3, 5, 10];
-let prepSec = 5;                 // get-ready lead-in before the clock starts
-const PREP_OPTS = [0, 5, 10];
-let bpm = 80;                    // metronome tempo, carried into and saved with the drill
-let metronomeOn = false;         // whether the click sounds (in-idle preview + during the drill)
-const BPM_MIN = 40, BPM_MAX = 240, BPM_STEP = 5;
+
+// Fresh installs start at level 1 (open majors) rather than the full CAGED
+// pool — landing a new player straight in every form/type/root/position at
+// once is what made practice feel overwhelming. Saved prefs override this.
+let activeForms, activeTypes, activePos, activeRoots;
+let maxSpan;                     // widest gap allowed between the two hand positions
+let sessionLengthMin;
+let prepSec;                     // get-ready lead-in before the clock starts
+let bpm;                         // metronome tempo, carried into and saved with the drill
+let metronomeOn;                 // whether the click sounds (in-idle preview + during the drill)
+resetPrefs();
+
+let currentUser = null;   // { id, name, is_admin } — who's practicing
+let users = [];           // everyone on this install
 
 let pairCounts = {};   // pair_sig -> times practiced
 let sigCounts  = {};   // signature -> times practiced (as either chord)
@@ -226,9 +246,31 @@ let timerHandle = null;
 let prepHandle = null;  // get-ready countdown before a drill
 let todays = [];       // [{ when:Date, pair, rating }]
 
+// Prefs are per user (two people sharing a device practise at different
+// levels), so switching user reloads them — always from a clean slate, or a
+// user with nothing saved would inherit the previous one's pool.
+const prefsKey = () => currentUser ? `${PREFS_KEY}:${currentUser.id}` : PREFS_KEY;
+
+function resetPrefs() {
+  activeForms = new Set(LEVELS[0].forms);
+  activeTypes = new Set(LEVELS[0].types);
+  activePos   = new Set(LEVELS[0].pos);
+  activeRoots = new Set(ALL_ROOTS);
+  maxSpan = 5;
+  sessionLengthMin = 5;
+  prepSec = 5;
+  bpm = 80;
+  metronomeOn = false;
+}
+
 function loadPrefs() {
+  resetPrefs();
   try {
-    const p = JSON.parse(localStorage.getItem(PREFS_KEY));
+    // the admin is the pre-multi-user single user, so their setup carries
+    // over from the old un-namespaced key the first time
+    const raw = localStorage.getItem(prefsKey())
+      ?? (currentUser?.is_admin ? localStorage.getItem(PREFS_KEY) : null);
+    const p = JSON.parse(raw);
     if (!p) return;
     const restore = (arr, all) => new Set((arr || []).filter(x => all.includes(x)));
     if (Array.isArray(p.forms)) activeForms = restore(p.forms, ALL_FORMS);
@@ -243,11 +285,180 @@ function loadPrefs() {
   } catch { /* ignore corrupt prefs */ }
 }
 function savePrefs() {
-  localStorage.setItem(PREFS_KEY, JSON.stringify({
+  localStorage.setItem(prefsKey(), JSON.stringify({
     forms:[...activeForms], types:[...activeTypes], pos:[...activePos],
     roots:[...activeRoots], span: maxSpan, length: sessionLengthMin, prep: prepSec,
     bpm, metronome: metronomeOn,
   }));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// USERS — no auth, just "who's practicing". The choice lives in
+// localStorage; the first name ever entered becomes the admin and is the
+// only one who can add or remove people. One dialog, three modes:
+//   first  – nothing exists yet, name yourself (you become the admin)
+//   pick   – users exist but this device hasn't chosen (can't be dismissed)
+//   manage – switch user, and for the admin add/remove them
+// ═══════════════════════════════════════════════════════════════════
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+let userModalMode = 'manage';
+let userGate = null;   // resolve fn while the app is blocked on choosing a user
+
+const isAdmin = () => !!currentUser?.is_admin;
+
+function setCurrentUser(u) {
+  currentUser = u;
+  localStorage.setItem(USER_KEY, String(u.id));
+  document.getElementById('user-btn-name').textContent = u.name;
+  document.getElementById('user-btn').title = u.is_admin ? `${u.name} (admin) — switch user` : `${u.name} — switch user`;
+}
+
+// The stored user no longer exists on the server — start over from the picker.
+function handleUserGone() {
+  localStorage.removeItem(USER_KEY);
+  location.reload();
+}
+
+async function loadUsers() {
+  try { users = await api.users(); } catch { users = []; }
+  return users;
+}
+
+// Blocks startup until a user is chosen.
+function gateOnUser() {
+  return new Promise(resolve => {
+    userGate = resolve;
+    showUserModal(users.length ? 'pick' : 'first');
+  });
+}
+
+function showUserModal(mode) {
+  userModalMode = mode;
+  document.getElementById('user-modal-title').textContent = mode === 'first' ? 'Welcome' : "Who's practicing?";
+  const text = document.getElementById('user-modal-text');
+  text.textContent = 'Enter your name to start. The first name becomes the admin, who can add or remove other players.';
+  text.hidden = mode !== 'first';
+
+  renderUserList();
+  document.getElementById('user-add-form').hidden = !(mode === 'first' || (mode === 'manage' && isAdmin()));
+  document.getElementById('user-add-btn').textContent = mode === 'first' ? 'Start' : 'Add';
+  document.getElementById('user-close-btn').hidden = mode !== 'manage';
+  setUserError('');
+
+  document.getElementById('user-modal').hidden = false;
+  document.body.classList.add('modal-open');
+  if (mode === 'first') document.getElementById('user-name-input').focus();
+}
+
+function closeUserModal() {
+  document.getElementById('user-modal').hidden = true;
+  document.getElementById('user-name-input').value = '';
+  // another dialog may still be showing — only drop the scroll lock if not
+  if (!document.querySelector('.modal-overlay:not([hidden])')) document.body.classList.remove('modal-open');
+}
+
+function setUserError(msg) {
+  const el = document.getElementById('user-error');
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
+function renderUserList() {
+  const list = document.getElementById('user-list');
+  list.hidden = userModalMode === 'first';
+  if (list.hidden) { list.innerHTML = ''; return; }
+
+  // the admin can remove anyone but themselves (that would leave no admin)
+  const canRemove = userModalMode === 'manage' && isAdmin();
+  list.innerHTML = users.map(u => `
+    <div class="user-row${currentUser?.id === u.id ? ' current' : ''}">
+      <button type="button" class="user-pick" data-id="${u.id}">
+        <span class="up-name">${esc(u.name)}</span>
+        ${u.is_admin ? '<span class="up-tag">admin</span>' : ''}
+      </button>
+      ${canRemove && u.id !== currentUser.id
+        ? `<button type="button" class="user-del" data-id="${u.id}" aria-label="Remove ${esc(u.name)}">✕</button>` : ''}
+    </div>`).join('');
+
+  list.querySelectorAll('.user-pick').forEach(b => b.onclick = () => pickUser(Number(b.dataset.id)));
+  list.querySelectorAll('.user-del').forEach(b => b.onclick = () => removeUser(Number(b.dataset.id)));
+}
+
+async function pickUser(id) {
+  const u = users.find(x => x.id === id);
+  if (!u) return;
+  const gate = userGate;
+  const same = currentUser?.id === u.id;
+  closeUserModal();
+  if (gate) { userGate = null; setCurrentUser(u); gate(); return; }
+  if (!same) await switchUser(u);
+}
+
+async function submitUserName(e) {
+  e.preventDefault();
+  const input = document.getElementById('user-name-input');
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const u = await api.addUser(name);
+    await loadUsers();
+    if (userGate) {                 // first run — this new name is the user
+      const gate = userGate;
+      userGate = null;
+      closeUserModal();
+      setCurrentUser(u);
+      gate();
+    } else {                        // admin added someone; stay in the dialog
+      input.value = '';
+      setUserError('');
+      renderUserList();
+    }
+  } catch (err) {
+    setUserError(err.message || 'Could not add that name.');
+  }
+}
+
+async function removeUser(id) {
+  const u = users.find(x => x.id === id);
+  if (!u) return;
+  const ok = await confirmModal({
+    title: 'Remove user?',
+    body: `${u.name} and their whole practice history will be deleted.`,
+    confirmLabel: 'Remove',
+    cancelLabel: 'Keep',
+  });
+  if (!ok) return;
+  try {
+    await api.delUser(id);
+    await loadUsers();
+    renderUserList();
+  } catch (err) {
+    setUserError(err.message || 'Could not remove that user.');
+  }
+}
+
+// Switching mid-drill would silently drop it, so the button is disabled
+// outside the idle view (see showView).
+async function openUserManage() {
+  await loadUsers();
+  if (!users.some(u => u.id === currentUser?.id)) return handleUserGone();
+  showUserModal('manage');
+}
+
+// Everything on screen is one user's — reload their prefs and their numbers.
+async function switchUser(u) {
+  setCurrentUser(u);
+  loadPrefs();
+  syncPrefsUI();
+  todays = [];
+  renderToday();
+  await refreshCounts();
+  renderIdle(true);
+  seedToday();
+  const tab = document.querySelector('.tab.active')?.dataset.tab;
+  if (tab === 'progress') renderDashboard();
+  else if (tab === 'history') renderHistory();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -303,6 +514,8 @@ function initChips() {
             () => sessionLengthMin, v => { sessionLengthMin = v; });
   buildSegs('prep-chips', [[0, 'Off'], [5, '5s'], [10, '10s']],
             () => prepSec, v => { prepSec = v; });
+
+  highlightMatchingLevel();
 }
 
 // Skill-level row: applies a curated forms/types/pos combination in one tap.
@@ -319,11 +532,7 @@ function buildLevelRow() {
     main.className = 'chip level-chip-main';
     main.textContent = lvl.label;
     main.title = lvl.desc;
-    main.onclick = () => {
-      applyLevel(i);
-      row.querySelectorAll('.level-chip-main').forEach(x => x.classList.remove('active'));
-      main.classList.add('active');
-    };
+    main.onclick = () => applyLevel(i);   // syncChipRows lights the chip up
 
     const info = document.createElement('button');
     info.type = 'button';
@@ -391,6 +600,29 @@ function syncChipRows() {
     const row = document.getElementById(rowId);
     [...row.children].forEach((c, idx) => c.classList.toggle('active', set.has(items[idx])));
   });
+  highlightMatchingLevel();
+}
+
+// Light up the level chip whose preset the pool currently matches exactly
+// (none, once the chips have been hand-edited away from a preset).
+const sameSet = (set, arr) => set.size === arr.length && arr.every(v => set.has(v));
+function highlightMatchingLevel() {
+  const i = LEVELS.findIndex(l => sameSet(activeForms, l.forms) && sameSet(activeTypes, l.types) && sameSet(activePos, l.pos));
+  document.querySelectorAll('#level-chips .level-chip-main')
+    .forEach((b, idx) => b.classList.toggle('active', idx === i));
+}
+
+// Push freshly loaded prefs (i.e. after a user switch) back onto the controls.
+function syncSegRow(rowId, values, current) {
+  [...document.getElementById(rowId).children]
+    .forEach((c, i) => c.classList.toggle('active', values[i] === current));
+}
+function syncPrefsUI() {
+  syncChipRows();
+  syncSegRow('length-chips', LENGTH_OPTS, sessionLengthMin);
+  syncSegRow('prep-chips', PREP_OPTS, prepSec);
+  updateMetroUI();
+  updateDrillSummary();
 }
 
 function buildSegs(rowId, options, get, set) {
@@ -420,6 +652,7 @@ function wireBulk(rowId, items, set, chips) {
     if (fill) items.forEach(v => set.add(v));
     chips.forEach((c, i) => c.classList.toggle('active', set.has(items[i])));
     savePrefs();
+    highlightMatchingLevel();
     if (active || pending) return;   // don't disrupt a running drill
     renderIdle();
   };
@@ -446,6 +679,7 @@ function chip(val, label, set) {
       set.add(val); c.classList.add('active');
     }
     savePrefs();
+    highlightMatchingLevel();
     if (active || pending) return;   // don't disrupt a running drill
     renderIdle();
   };
@@ -666,6 +900,8 @@ function showView(name) {
   document.getElementById('prep-controls').hidden    = name !== 'prep';
   // no swapping pairs mid-drill — the swap link only lives in idle
   document.getElementById('shuffle-btn').disabled = name !== 'idle';
+  // switching user mid-drill would drop it, so lock that down too
+  document.getElementById('user-btn').disabled = name !== 'idle';
   // the pool stays put at the top through every state, so nothing jumps
   document.getElementById('today-section').style.display =
     (name === 'idle' && todays.length) ? 'flex' : 'none';
@@ -942,7 +1178,8 @@ function confirmModal({ title = 'Are you sure?', body = '', confirmLabel = 'Conf
 
     const close = result => {
       overlay.hidden = true;
-      document.body.classList.remove('modal-open');
+      // may have been opened on top of another dialog (e.g. the user list)
+      if (!document.querySelector('.modal-overlay:not([hidden])')) document.body.classList.remove('modal-open');
       okBtn.onclick = cancelBtn.onclick = overlay.onclick = null;
       document.removeEventListener('keydown', onKey, true);
       resolve(result);
@@ -1320,6 +1557,19 @@ async function seedToday() {
 async function init() {
   applyTheme(document.documentElement.dataset.theme);
   document.getElementById('theme-toggle').onclick = toggleTheme;
+
+  // Who's practicing has to be settled before anything loads — every
+  // practice endpoint is scoped to a user, and so are the saved prefs.
+  document.getElementById('user-btn').onclick = openUserManage;
+  document.getElementById('user-add-form').onsubmit = submitUserName;
+  document.getElementById('user-close-btn').onclick = closeUserModal;
+  const userOverlay = document.getElementById('user-modal');
+  userOverlay.onclick = e => { if (e.target === userOverlay && !userGate) closeUserModal(); };
+  await loadUsers();
+  const saved = users.find(u => u.id === Number(localStorage.getItem(USER_KEY)));
+  if (saved) setCurrentUser(saved);
+  else await gateOnUser();
+
   loadPrefs();
   initChips();
   updateMetroUI();
@@ -1350,9 +1600,11 @@ async function init() {
   });
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
+    if (!document.getElementById('confirm-modal').hidden) return;   // handles its own keys
     if (!chordPopupOverlay.hidden) { e.preventDefault(); closeChordPopup(); }
     else if (!settingsOverlay.hidden) { e.preventDefault(); closeSettings(); }
     else if (!levelInfoOverlay.hidden) { e.preventDefault(); closeLevelInfo(); }
+    else if (!userOverlay.hidden && !userGate) { e.preventDefault(); closeUserModal(); }
   });
   document.getElementById('endearly-btn').onclick = () => finishDrill('early');
   document.getElementById('cancel-btn').onclick = cancelDrill;

@@ -1,6 +1,6 @@
 # Guitar Practice
 
-A single-user web app for focused guitar chord-transition practice. You run
+A small web app for focused guitar chord-transition practice. You run
 **5-minute drills on a single chord pair**, and the app always serves up the
 pair you've practiced **least**. Built around a CAGED chord engine (12 roots ×
 5 forms × 6 types) with generated fret diagrams.
@@ -19,7 +19,14 @@ pair you've practiced **least**. Built around a CAGED chord engine (12 roots ×
   activity heatmap, daily-minutes chart, least- and most-practiced shape pairs,
   optional rated-mastery breakdown, and recent drills.
 
-No accounts, no auth. All data lives in a SQLite file.
+- **Users, without accounts** — on first load the app asks for a name; that
+  first name becomes the **admin** and is the only one who can add or remove
+  players. After that each load picks who's practicing from the list, and the
+  choice is remembered in `localStorage`. Practice history, stats and the
+  practice-pool settings are all per user.
+
+No passwords, no auth — the user list is a profile switch on a trusted (home)
+network, not a security boundary. All data lives in a SQLite file.
 
 ## Run locally
 
@@ -63,9 +70,17 @@ docker run -d -p 8080:8080 -v guitar-data:/data --name guitar guitar-practice
 
 ## API
 
+Every route below except `GET`/`POST /api/users` is scoped to the caller,
+identified by an `X-User-Id` header (unknown id → `401`).
+
 | Method | Path                    | Purpose                                   |
 |--------|-------------------------|-------------------------------------------|
+| GET    | `/api/users`            | Everyone on this install                  |
+| POST   | `/api/users`            | Add a user (open only while there are none; then admin-only) |
+| DELETE | `/api/users/:id`        | Remove a user and their history (admin only, not self) |
 | POST   | `/api/sessions`         | Record a completed drill (pair, duration, rating) |
+| GET    | `/api/sessions`         | Full drill log                            |
+| DELETE | `/api/sessions/:id`     | Delete one drill, recompute that pair's stats |
 | GET    | `/api/practice-counts`  | Per-shape / per-pair practice counts (drives selection) |
 | GET    | `/api/stats`            | Dashboard data                            |
 
